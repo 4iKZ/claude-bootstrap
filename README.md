@@ -12,77 +12,85 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-333.svg?style=flat-square" alt="Platform">
-  <img src="https://img.shields.io/badge/shell-bash-4EAA25.svg?style=flat-square&logo=gnubash&logoColor=white" alt="Shell">
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-333.svg?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/shell-bash%20%7C%20pwsh-4EAA25.svg?style=flat-square" alt="Shell">
   <img src="https://img.shields.io/badge/node-%3E%3D18-green.svg?style=flat-square&logo=nodedotjs&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License">
 </p>
 
 ---
 
-## 这是什么？
+## 一行命令安装
 
-一个通用的 **Claude Code 一键安装脚本**。在一台没有开发环境的 Linux / macOS 机器上，运行这个脚本即可完成：
-
-- 系统依赖安装（curl、git、tar、xz）
-- Node.js 22 环境搭建（通过 nvm）
-- Claude Code 全局安装（npm）
-- API 网关配置（BASE_URL + API Key / Auth Token）
-- 动态模型列表获取
-- Shell 环境自动注入
-- Claude Code settings.json 同步
-
-脚本会自动识别发行版和包管理器（apt、dnf、yum、apk、pacman、zypper），无需手动干预。
-
----
-
-## 快速开始
-
-```bash
-# 1. 下载脚本
-curl -fsSL -o claude-bootstrap.sh \
-  https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.sh
-
-# 2. 运行
-bash claude-bootstrap.sh
-```
-
-或者一行搞定：
+### Linux / macOS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.sh | bash
 ```
 
-> **注意**：管道方式下，脚本无法修改父 shell 环境。完成后请执行 `source ~/.bashrc`（或对应的 shell 配置文件），或重新打开终端。
+### Windows
+
+```powershell
+irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.ps1 | iex
+```
+
+> **Linux / macOS**：管道方式无法修改父 shell 环境，完成后 `source ~/.bashrc` 或重新打开终端。
+>
+> **Windows**：若提示 "无法加载"，先运行 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`，或使用 `powershell -ExecutionPolicy Bypass` 启动。
+
+---
+
+## 这是什么？
+
+在一台**没有任何开发环境**的机器上，运行上面那一行命令即可自动完成：
+
+- ✅ 系统依赖安装（curl、git、tar、xz / winget）
+- ✅ Node.js 22 环境搭建（nvm / fnm）
+- ✅ Claude Code 全局安装（npm）
+- ✅ API 网关配置（BASE_URL + API Key / Auth Token）
+- ✅ 动态模型列表获取
+- ✅ Shell / PowerShell 环境自动注入
+- ✅ Claude Code settings.json 同步
+
+脚本会自动识别操作系统和包管理器（apt、dnf、yum、apk、pacman、zypper、winget），无需手动干预。
+
+---
+
+## 带配置的一行安装
+
+如果你已经知道网关地址，可以跳过交互式输入：
+
+### Linux / macOS
+
+```bash
+BOOTSTRAP_BASE_URL="https://api.example.com" bash -c "$(curl -fsSL https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.sh)"
+```
+
+### Windows
+
+```powershell
+$env:BOOTSTRAP_BASE_URL="https://api.example.com"; irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.ps1 | iex
+```
 
 ---
 
 ## 配置选项
 
-脚本支持通过环境变量预置配置，适合批量部署：
-
-| 环境变量                                   | 默认值                             | 说明                                               |
-| ------------------------------------------ | ---------------------------------- | -------------------------------------------------- |
-| `TEAM_BASE_URL`                            | —                                 | API 网关地址，如`https://api.example.com` |
-| `DEFAULT_AUTH_MODE`                        | `auth_token`                       | 认证模式：`auth_token` 或 `api_key`                |
-| `CREATE_CLAUDE_WRAPPER`                    | `1`                                | 是否创建`~/.claude-code/bin/claude` 包装脚本       |
-| `ENABLE_GATEWAY_MODEL_DISCOVERY`           | `1`                                | 是否从网关动态拉取模型列表                         |
-| `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT` | `0`                                | 子进程环境清理策略                                 |
-| `NVM_VERSION`                              | `v0.40.3`                          | nvm 版本                                           |
-| `REQUIRED_NODE_MAJOR`                      | `22`                               | 目标 Node.js 主版本号                              |
-| `CLAUDE_NPM_PACKAGE`                       | `@anthropic-ai/claude-code@latest` | Claude Code npm 包名                               |
-
-示例——预填网关地址和认证模式：
-
-```bash
-TEAM_BASE_URL="https://api.example.com" \
-DEFAULT_AUTH_MODE="api_key" \
-  bash install.sh
-```
+| 环境变量                                   | 默认值                             | 说明                                |
+| ------------------------------------------ | ---------------------------------- | ----------------------------------- |
+| `BOOTSTRAP_BASE_URL`                       | —                                 | API 网关地址                        |
+| `DEFAULT_AUTH_MODE`                        | `auth_token`                       | 认证模式：`auth_token` 或 `api_key` |
+| `CREATE_CLAUDE_WRAPPER`                    | `1`                                | 是否创建 wrapper 脚本               |
+| `ENABLE_GATEWAY_MODEL_DISCOVERY`           | `1`                                | 是否从网关动态拉取模型列表          |
+| `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT` | `0`                                | 子进程环境清理策略                  |
+| `REQUIRED_NODE_MAJOR`                      | `22`                               | 目标 Node.js 主版本号               |
+| `CLAUDE_NPM_PACKAGE`                       | `@anthropic-ai/claude-code@latest` | Claude Code npm 包名                |
 
 ---
 
 ## 执行流程
+
+### Linux / macOS (install.sh)
 
 ```
 检测平台（Linux / macOS + 架构）
@@ -108,49 +116,61 @@ DEFAULT_AUTH_MODE="api_key" \
 npm install -g @anthropic-ai/claude-code
         │
         ▼
-交互式配置
-  ├─ 输入 API 网关 BASE_URL
-  ├─ 选择认证模式（Auth Token / API Key）
-  ├─ 输入密钥
-  ├─ 动态拉取可用模型列表（或使用内置兜底列表）
-  └─ 选择默认模型
+交互式配置 → 写入配置 → 连通性验证 → 打印摘要
+```
+
+### Windows (install.ps1)
+
+```
+检测平台（Windows + 架构）
         │
         ▼
-写入配置文件
-  ├─ ~/.claude-code/env              (环境变量)
-  ├─ ~/.claude/settings.json         (Claude Code 官方配置)
-  └─ ~/.bashrc / ~/.zshrc            (PATH 注入)
+检查内存（建议 ≥ 4 GB）
         │
         ▼
-连通性验证 → 打印摘要
+检测管理员权限
+        │
+        ▼
+安装基础依赖（git，通过 winget）
+        │
+        ▼
+安装 fnm + Node.js 22
+        │
+        ▼
+npm install -g @anthropic-ai/claude-code
+        │
+        ▼
+交互式配置 → 写入配置 → 连通性验证 → 打印摘要
 ```
 
 ---
 
 ## 生成的文件
 
-| 路径                        | 说明                                |
-| --------------------------- | ----------------------------------- |
-| `~/.claude-code/env`        | API 网关环境变量（chmod 600）         |
-| `~/.claude-code/bin/claude` | 包装脚本，启动时自动加载环境变量      |
-| `~/.claude/settings.json`   | Claude Code 官方配置，同步 env 内容 |
-| `~/.nvm/`                   | nvm 及 Node.js 安装目录             |
+| 路径                             | 说明                               |
+| -------------------------------- | ---------------------------------- |
+| `~/.claude-bootstrap/env`        | 环境变量文件（Linux/macOS）        |
+| `~/.claude-bootstrap/env.ps1`    | 环境变量文件（Windows PowerShell） |
+| `~/.claude-bootstrap/env.cmd`    | 环境变量文件（Windows cmd）        |
+| `~/.claude-bootstrap/bin/claude` | 包装脚本                           |
+| `~/.claude/settings.json`        | Claude Code 官方配置               |
 
 ---
 
 ## 支持的平台
 
-| 操作系统      | 架构        | 状态                   |
-| ------------- | ----------- | ---------------------- |
-| Ubuntu 20.04+ | x64 / ARM64 | ✅ 完全支持            |
-| Debian 11+    | x64 / ARM64 | ✅ 完全支持            |
-| Fedora 38+    | x64 / ARM64 | ✅ 完全支持            |
-| RHEL 7/8/9    | x64         | ✅ 支持                |
-| Alpine 3.17+  | x64 / ARM64 | ✅ 支持（需先装 bash） |
-| Arch Linux    | x64         | ✅ 支持                |
-| openSUSE      | x64         | ✅ 支持                |
-| macOS 12+     | x64 / ARM64 | ✅ 完全支持            |
-| Windows       | —          | ❌ 不支持              |
+| 操作系统             | 架构        | 脚本        | 状态              |
+| -------------------- | ----------- | ----------- | ----------------- |
+| Ubuntu 20.04+        | x64 / ARM64 | install.sh  | ✅                |
+| Debian 11+           | x64 / ARM64 | install.sh  | ✅                |
+| Fedora 38+           | x64 / ARM64 | install.sh  | ✅                |
+| RHEL 7/8/9           | x64         | install.sh  | ✅                |
+| Alpine 3.17+         | x64 / ARM64 | install.sh  | ✅（需先装 bash） |
+| Arch Linux           | x64         | install.sh  | ✅                |
+| openSUSE             | x64         | install.sh  | ✅                |
+| macOS 12+            | x64 / ARM64 | install.sh  | ✅                |
+| Windows 10+          | x64 / ARM64 | install.ps1 | ✅                |
+| Windows Server 2019+ | x64         | install.ps1 | ✅                |
 
 ---
 
@@ -159,27 +179,16 @@ npm install -g @anthropic-ai/claude-code
 <details>
 <summary><strong>Alpine Linux：command not found: bash</strong></summary>
 
-Alpine 默认不含 bash。先执行：
-
 ```bash
 apk add bash
 ```
-
-然后重新运行脚本。
-
-</details>
-
-<details>
-<summary><strong>缺少基础依赖且无 sudo</strong></summary>
-
-脚本会提示具体缺少的包名。请手动安装后再运行，或切换到有 root 权限的用户。
 
 </details>
 
 <details>
 <summary><strong>nvm install 失败：tar 无法解压 .tar.xz</strong></summary>
 
-缺少 xz 解压工具。脚本已自动处理，但若你跳过了包安装阶段，可手动安装：
+脚本已自动处理，若跳过了包安装阶段：
 
 - Debian/Ubuntu: `sudo apt install xz-utils`
 - Fedora/RHEL: `sudo dnf install xz`
@@ -188,19 +197,41 @@ apk add bash
 </details>
 
 <details>
+<summary><strong>Windows：运行脚本提示 "无法加载文件"</strong></summary>
+
+PowerShell 默认禁止执行脚本，使用 `-ExecutionPolicy Bypass` 运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+</details>
+
+<details>
+<summary><strong>Windows：winget 找不到</strong></summary>
+
+Windows 10 早期版本可能未安装 winget。从 Microsoft Store 安装"应用安装程序"（App Installer），或手动安装 git 和 fnm 后重新运行。
+
+</details>
+
+<details>
 <summary><strong>Claude Code 启动时提示 bubblewrap 错误</strong></summary>
 
-脚本默认设置 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0`。若仍有问题，检查 `~/.claude-code/env` 是否已正确 source。
+脚本默认设置 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0`，避免缺少 bubblewrap 时启动失败。
 
 </details>
 
 <details>
 <summary><strong>重新配置</strong></summary>
 
-直接重新运行脚本即可——它会检测已有配置并询问是否覆盖：
+直接重新运行脚本——它会检测已有配置并询问是否覆盖：
 
 ```bash
-bash install.sh
+bash install.sh        # Linux / macOS
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1   # Windows
 ```
 
 </details>
@@ -209,8 +240,8 @@ bash install.sh
 
 ## 安全说明
 
-- API Key / Auth Token 写入文件时自动设置 `chmod 600`（仅所有者可读写）
-- `~/.claude-code/` 目录设置为 `chmod 700`
+- API Key / Auth Token 写入文件时仅所有者可读写
+- `~/.claude-bootstrap/` 目录设置为仅所有者可访问
 - 脚本不通过命令行参数传递密钥，全部采用交互式输入（隐藏回显）或环境变量
 - 建议生产环境中通过环境变量预注密钥，避免交互式输入被日志记录
 
