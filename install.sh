@@ -917,8 +917,6 @@ Claude Code 团队安装配置完成
 启动 Claude Code：
   claude
 
-重新配置：
-  bash claude-bootstrap-v1.2.sh
 
 注意：
   - API Key/Auth Token 已写入 $ENV_FILE 和 $CLAUDE_SETTINGS_JSON，并设置为 chmod 600。
