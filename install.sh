@@ -675,10 +675,10 @@ ask_base_url() {
   local url="$TEAM_BASE_URL"
   local maybe=""
   if [[ -z "$url" ]]; then
-    printf "请输入 ANTHROPIC_BASE_URL（API 网关地址），例如 https://api.example.com: " >&2
+    printf "请输入 ANTHROPIC_BASE_URL（API 网关根地址，不需要追加 /v1、/v1/messages 或其他路径），例如 https://api.example.com: " >&2
     read -r url
   else
-    printf "ANTHROPIC_BASE_URL 使用 %s，是否修改？直接回车表示不修改：" "$url" >&2
+    printf "ANTHROPIC_BASE_URL 使用 %s（只需要网关根地址，不需要追加 /v1、/v1/messages 或其他路径），是否修改？直接回车表示不修改：" "$url" >&2
     read -r maybe || true
     if [[ -n "${maybe:-}" ]]; then
       url="$maybe"

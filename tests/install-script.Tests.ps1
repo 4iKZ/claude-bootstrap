@@ -3,8 +3,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $installScript = Join-Path $repoRoot "install.ps1"
 $shellScript = Join-Path $repoRoot "install.sh"
-$source = Get-Content -Path $installScript -Raw
-$shellSource = Get-Content -Path $shellScript -Raw
+$source = [System.IO.File]::ReadAllText($installScript, [System.Text.Encoding]::UTF8)
+$shellSource = [System.IO.File]::ReadAllText($shellScript, [System.Text.Encoding]::UTF8)
 
 function Assert-Contains {
     param(
@@ -79,5 +79,15 @@ Assert-Contains `
     -Text $shellSource `
     -Pattern 'grep\s+-Fq\s+--\s+"\$model"' `
     -Message "Shell gateway validation should use fixed-string grep for model names."
+
+Assert-Contains `
+    -Text $source `
+    -Pattern '/v1/messages' `
+    -Message "PowerShell BASE_URL prompt should tell users not to append API paths."
+
+Assert-Contains `
+    -Text $shellSource `
+    -Pattern '/v1/messages' `
+    -Message "Shell BASE_URL prompt should tell users not to append API paths."
 
 Write-Host "install-script.Tests.ps1 passed"

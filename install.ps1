@@ -669,9 +669,9 @@ function Test-BaseUrlFormat {
 function Ask-BaseUrl {
     $url = $BOOTSTRAP_BASE_URL
     if ([string]::IsNullOrEmpty($url)) {
-        $url = Read-Host -Prompt "请输入 ANTHROPIC_BASE_URL，例如 https://api.example.com"
+        $url = Read-Host -Prompt "请输入 ANTHROPIC_BASE_URL（API 网关根地址，不需要追加 /v1、/v1/messages 或其他路径），例如 https://api.example.com"
     } else {
-        $maybe = Read-Host -Prompt "ANTHROPIC_BASE_URL 使用 ${url}，是否修改？直接回车表示不修改"
+        $maybe = Read-Host -Prompt "ANTHROPIC_BASE_URL 使用 ${url}（只需要网关根地址，不需要追加 /v1、/v1/messages 或其他路径），是否修改？直接回车表示不修改"
         if (-not [string]::IsNullOrEmpty($maybe)) {
             $url = $maybe
         }
