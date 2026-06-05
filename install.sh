@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Claude Code Team Bootstrap v1.2
+# Claude Code Bootstrap v1.2
 # Target: Linux / macOS only. Windows is intentionally not supported.
 # Usage:
 #   bash claude-bootstrap-v1.2.sh
@@ -9,11 +9,11 @@ set -Eeuo pipefail
 #   TEAM_BASE_URL="https://your-gateway.example.com" bash claude-bootstrap-v1.2.sh
 
 #######################################
-# Team defaults. Adjust these for your team.
+# Defaults. Adjust these as needed.
 #######################################
 TEAM_BASE_URL="${TEAM_BASE_URL:-}"                    # Example: https://api.internal.example.com
 DEFAULT_AUTH_MODE="${DEFAULT_AUTH_MODE:-auth_token}"  # auth_token | api_key
-CREATE_CLAUDE_WRAPPER="${CREATE_CLAUDE_WRAPPER:-1}"   # 1 creates ~/.claude-team/bin/claude wrapper
+CREATE_CLAUDE_WRAPPER="${CREATE_CLAUDE_WRAPPER:-1}"   # 1 creates ~/.claude-code/bin/claude wrapper
 ENABLE_GATEWAY_MODEL_DISCOVERY="${ENABLE_GATEWAY_MODEL_DISCOVERY:-1}"
 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT="${CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT:-0}"
 NVM_VERSION="${NVM_VERSION:-v0.40.3}"
@@ -35,13 +35,13 @@ DEFAULT_MODEL_INDEX=1
 MODEL_MENU=()
 AVAILABLE_MODELS=()
 
-CONFIG_DIR="$HOME/.claude-team"
+CONFIG_DIR="$HOME/.claude-code"
 ENV_FILE="$CONFIG_DIR/env"
 WRAPPER_DIR="$CONFIG_DIR/bin"
 CLAUDE_WRAPPER="$WRAPPER_DIR/claude"
 CLAUDE_SETTINGS_JSON="$HOME/.claude/settings.json"
-PROFILE_MARKER_BEGIN="# >>> claude-team bootstrap >>>"
-PROFILE_MARKER_END="# <<< claude-team bootstrap <<<"
+PROFILE_MARKER_BEGIN="# >>> claude-code bootstrap >>>"
+PROFILE_MARKER_END="# <<< claude-code bootstrap <<<"
 
 info() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 success() { printf '\033[1;32m[OK]\033[0m %s\n' "$*"; }
@@ -333,6 +333,16 @@ select_profile_file() {
         profile_file="$HOME/.bashrc"
       fi
       ;;
+    fish)
+      warn "Fish shell 不支持 Bash 配置文件语法，无法自动注入环境变量。"
+      info "安装完成后，请将以下内容添加到 ~/.config/fish/config.fish："
+      info ""
+      info "  fish_add_path \$HOME/.claude-code/bin \$HOME/.local/bin"
+      info "  if test -f \$HOME/.claude-code/env; bass source \$HOME/.claude-code/env; end"
+      info ""
+      warn "nvm 在 fish 中需额外工具（如 bass 或 nvm.fish），请参考 nvm 文档。"
+      profile_file="$HOME/.bashrc"
+      ;;
     *)
       if [[ -f "$HOME/.zshrc" ]]; then
         profile_file="$HOME/.zshrc"
@@ -368,12 +378,12 @@ write_profile_block() {
 
   {
     printf '\n%s\n' "$PROFILE_MARKER_BEGIN"
-    printf 'export PATH="$HOME/.claude-team/bin:$HOME/.local/bin:$PATH"\n'
+    printf 'export PATH="$HOME/.claude-code/bin:$HOME/.local/bin:$PATH"\n'
     if [[ -n "$npm_bin" ]]; then
       printf 'export PATH="%s:$PATH"\n' "$npm_bin"
     fi
     printf '[ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"\n'
-    printf '[ -f "$HOME/.claude-team/env" ] && . "$HOME/.claude-team/env"\n'
+    printf '[ -f "$HOME/.claude-code/env" ] && . "$HOME/.claude-code/env"\n'
     printf '%s\n' "$PROFILE_MARKER_END"
   } >> "$profile_file"
 
@@ -411,7 +421,7 @@ read_api_secret() {
 choose_auth_mode() {
   local choice=""
   printf "\n请选择认证变量：\n" >&2
-  printf "  1) ANTHROPIC_AUTH_TOKEN  作为 Authorization: Bearer <token> 发送，通常适合内部中转站 [默认]\n" >&2
+  printf "  1) ANTHROPIC_AUTH_TOKEN  作为 Authorization: Bearer <token> 发送，通常适合 API 网关 / 中转服务 [默认]\n" >&2
   printf "  2) ANTHROPIC_API_KEY     作为 X-Api-Key 发送，通常适合原生 Anthropic API\n" >&2
   printf "请输入编号 [1]: " >&2
   read -r choice || true
@@ -539,12 +549,12 @@ prepare_model_menu() {
   AVAILABLE_MODELS=()
   MODEL_MENU=()
 
-  if fetch_model_ids_from_gateway "$base_url" "$auth_mode" "$secret" > /tmp/claude-team-models.$$; then
+  if fetch_model_ids_from_gateway "$base_url" "$auth_mode" "$secret" > /tmp/claude-code-models.$$; then
     while IFS= read -r line; do
       [[ -n "$line" ]] && AVAILABLE_MODELS+=("$line")
-    done < /tmp/claude-team-models.$$
+    done < /tmp/claude-code-models.$$
   fi
-  rm -f /tmp/claude-team-models.$$ 2>/dev/null || true
+  rm -f /tmp/claude-code-models.$$ 2>/dev/null || true
 
   if [[ ${#AVAILABLE_MODELS[@]} -gt 0 ]]; then
     success "已从网关获取 ${#AVAILABLE_MODELS[@]} 个可用模型。"
@@ -603,6 +613,10 @@ choose_model() {
 
   filter_model_menu_if_needed
 
+  if (( DEFAULT_MODEL_INDEX < 1 || DEFAULT_MODEL_INDEX > ${#MODEL_MENU[@]} )); then
+    DEFAULT_MODEL_INDEX=1
+  fi
+
   total_count="${#MODEL_MENU[@]}"
   display_count="$total_count"
   if (( display_count > MODEL_MENU_MAX_DISPLAY )); then
@@ -658,7 +672,7 @@ ask_base_url() {
   local url="$TEAM_BASE_URL"
   local maybe=""
   if [[ -z "$url" ]]; then
-    printf "请输入团队内部 ANTHROPIC_BASE_URL，例如 https://api.example.com: " >&2
+    printf "请输入 ANTHROPIC_BASE_URL（API 网关地址），例如 https://api.example.com: " >&2
     read -r url
   else
     printf "ANTHROPIC_BASE_URL 使用 %s，是否修改？直接回车表示不修改：" "$url" >&2
@@ -750,7 +764,7 @@ env.ANTHROPIC_MODEL = process.env.CLAUDE_TEAM_MODEL;
 env.ANTHROPIC_CUSTOM_MODEL_OPTION = process.env.CLAUDE_TEAM_MODEL;
 env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = process.env.CLAUDE_TEAM_GATEWAY_MODEL_DISCOVERY || '1';
 env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = process.env.CLAUDE_TEAM_ENV_SCRUB || '0';
-data.skipWebFetchPreflight = true;
+if (data.skipWebFetchPreflight === undefined) data.skipWebFetchPreflight = true;
 data.env = env;
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
@@ -806,10 +820,10 @@ create_claude_wrapper() {
 set -euo pipefail
 REAL_CLAUDE_BIN=$(shell_quote "$real_claude")
 [ -s "\$HOME/.nvm/nvm.sh" ] && . "\$HOME/.nvm/nvm.sh"
-[ -f "\$HOME/.claude-team/env" ] && . "\$HOME/.claude-team/env"
+[ -f "\$HOME/.claude-code/env" ] && . "\$HOME/.claude-code/env"
 if [[ ! -x "\$REAL_CLAUDE_BIN" ]]; then
   echo "[ERROR] real claude binary not found: \$REAL_CLAUDE_BIN" >&2
-  echo "Please rerun claude-bootstrap-v1.2.sh." >&2
+  echo "Please rerun the install script." >&2
   exit 1
 fi
 exec "\$REAL_CLAUDE_BIN" "\$@"
@@ -856,7 +870,7 @@ validate_gateway() {
       if grep -q "${model}" "$tmp" 2>/dev/null; then
         success "模型列表中检测到当前模型：$model"
       else
-        warn "模型列表中未直接匹配到 $model。若你们的中转站使用映射模型名，可忽略。"
+        warn "模型列表中未直接匹配到 $model。若 API 网关使用映射模型名，可忽略。"
       fi
       ;;
     401|403)
@@ -881,8 +895,8 @@ validate_gateway() {
 
 configure_claude() {
   if [[ -f "$ENV_FILE" ]]; then
-    warn "检测到已有团队配置：$ENV_FILE"
-    if ! confirm "是否覆盖已有 Claude Code 团队配置？" "N"; then
+    warn "检测到已有配置：$ENV_FILE"
+    if ! confirm "是否覆盖已有 Claude Code 配置？" "N"; then
       success "保留已有配置。"
       sync_settings_from_existing_env
       write_profile_block
@@ -909,7 +923,7 @@ print_summary() {
   cat <<SUMMARY
 
 ============================================================
-Claude Code 团队安装配置完成
+Claude Code 安装配置完成
 ============================================================
 
 当前环境变量配置文件：
@@ -942,6 +956,8 @@ main() {
   check_memory
   setup_sudo
   install_basic_deps
+  # Ensure stdin is a TTY for interactive prompts (handles curl|bash pipe case)
+  [[ -t 0 ]] || exec 0</dev/tty
   ensure_node22
   install_claude_code
   configure_claude

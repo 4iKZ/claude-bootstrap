@@ -8,7 +8,7 @@
 <h1 align="center">Claude Code Bootstrap</h1>
 
 <p align="center">
-  <strong>一条命令，完成 Claude Code 团队环境搭建</strong>
+  <strong>一条命令，完成 Claude Code 环境搭建</strong>
 </p>
 
 <p align="center">
@@ -22,12 +22,12 @@
 
 ## 这是什么？
 
-一个面向团队的 **Claude Code 一键安装脚本**。在一台没有开发环境的 Linux / macOS 机器上，运行这个脚本即可完成：
+一个通用的 **Claude Code 一键安装脚本**。在一台没有开发环境的 Linux / macOS 机器上，运行这个脚本即可完成：
 
 - 系统依赖安装（curl、git、tar、xz）
 - Node.js 22 环境搭建（通过 nvm）
 - Claude Code 全局安装（npm）
-- 团队网关配置（BASE_URL + API Key / Auth Token）
+- API 网关配置（BASE_URL + API Key / Auth Token）
 - 动态模型列表获取
 - Shell 环境自动注入
 - Claude Code settings.json 同步
@@ -59,13 +59,13 @@ curl -fsSL https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.
 
 ## 配置选项
 
-脚本支持通过环境变量预置团队默认值，适合批量部署：
+脚本支持通过环境变量预置配置，适合批量部署：
 
 | 环境变量                                   | 默认值                             | 说明                                               |
 | ------------------------------------------ | ---------------------------------- | -------------------------------------------------- |
-| `TEAM_BASE_URL`                            | —                                 | 团队网关地址，如`https://api.internal.example.com` |
+| `TEAM_BASE_URL`                            | —                                 | API 网关地址，如`https://api.example.com` |
 | `DEFAULT_AUTH_MODE`                        | `auth_token`                       | 认证模式：`auth_token` 或 `api_key`                |
-| `CREATE_CLAUDE_WRAPPER`                    | `1`                                | 是否创建`~/.claude-team/bin/claude` 包装脚本       |
+| `CREATE_CLAUDE_WRAPPER`                    | `1`                                | 是否创建`~/.claude-code/bin/claude` 包装脚本       |
 | `ENABLE_GATEWAY_MODEL_DISCOVERY`           | `1`                                | 是否从网关动态拉取模型列表                         |
 | `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT` | `0`                                | 子进程环境清理策略                                 |
 | `NVM_VERSION`                              | `v0.40.3`                          | nvm 版本                                           |
@@ -75,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.
 示例——预填网关地址和认证模式：
 
 ```bash
-TEAM_BASE_URL="https://api.internal.example.com" \
+TEAM_BASE_URL="https://api.example.com" \
 DEFAULT_AUTH_MODE="api_key" \
   bash install.sh
 ```
@@ -109,7 +109,7 @@ npm install -g @anthropic-ai/claude-code
         │
         ▼
 交互式配置
-  ├─ 输入团队网关 BASE_URL
+  ├─ 输入 API 网关 BASE_URL
   ├─ 选择认证模式（Auth Token / API Key）
   ├─ 输入密钥
   ├─ 动态拉取可用模型列表（或使用内置兜底列表）
@@ -117,7 +117,7 @@ npm install -g @anthropic-ai/claude-code
         │
         ▼
 写入配置文件
-  ├─ ~/.claude-team/env              (环境变量)
+  ├─ ~/.claude-code/env              (环境变量)
   ├─ ~/.claude/settings.json         (Claude Code 官方配置)
   └─ ~/.bashrc / ~/.zshrc            (PATH 注入)
         │
@@ -131,8 +131,8 @@ npm install -g @anthropic-ai/claude-code
 
 | 路径                        | 说明                                |
 | --------------------------- | ----------------------------------- |
-| `~/.claude-team/env`        | 团队网关环境变量（chmod 600）       |
-| `~/.claude-team/bin/claude` | 包装脚本，启动时自动加载团队环境    |
+| `~/.claude-code/env`        | API 网关环境变量（chmod 600）         |
+| `~/.claude-code/bin/claude` | 包装脚本，启动时自动加载环境变量      |
 | `~/.claude/settings.json`   | Claude Code 官方配置，同步 env 内容 |
 | `~/.nvm/`                   | nvm 及 Node.js 安装目录             |
 
@@ -190,7 +190,7 @@ apk add bash
 <details>
 <summary><strong>Claude Code 启动时提示 bubblewrap 错误</strong></summary>
 
-脚本默认设置 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0`。若仍有问题，检查 `~/.claude-team/env` 是否已正确 source。
+脚本默认设置 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0`。若仍有问题，检查 `~/.claude-code/env` 是否已正确 source。
 
 </details>
 
@@ -210,7 +210,7 @@ bash install.sh
 ## 安全说明
 
 - API Key / Auth Token 写入文件时自动设置 `chmod 600`（仅所有者可读写）
-- `~/.claude-team/` 目录设置为 `chmod 700`
+- `~/.claude-code/` 目录设置为 `chmod 700`
 - 脚本不通过命令行参数传递密钥，全部采用交互式输入（隐藏回显）或环境变量
 - 建议生产环境中通过环境变量预注密钥，避免交互式输入被日志记录
 
@@ -223,5 +223,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>Built with ❤️ for Claude Code teams</sub>
+  <sub>Built with ❤️ for Claude Code users</sub>
 </p>
