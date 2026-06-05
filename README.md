@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.
 ### Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.ps1 | iex
+iex (irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.ps1)
 ```
 
 > **Linux / macOS**：管道方式无法修改父 shell 环境，完成后 `source ~/.bashrc` 或重新打开终端。
@@ -69,7 +69,7 @@ BOOTSTRAP_BASE_URL="https://api.example.com" bash -c "$(curl -fsSL https://raw.g
 ### Windows
 
 ```powershell
-$env:BOOTSTRAP_BASE_URL="https://api.example.com"; irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.ps1 | iex
+$env:BOOTSTRAP_BASE_URL="https://api.example.com"; iex (irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.ps1)
 ```
 
 ---
