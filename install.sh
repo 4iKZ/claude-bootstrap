@@ -153,20 +153,31 @@ install_basic_deps_linux() {
 
   if need_cmd apt-get; then
     $sudo_cmd apt-get update
-    $sudo_cmd apt-get install -y "${missing[@]}" ca-certificates
+    $sudo_cmd apt-get install -y "${missing[@]}" ca-certificates xz-utils
   elif need_cmd dnf; then
-    $sudo_cmd dnf install -y "${missing[@]}" ca-certificates
+    $sudo_cmd dnf install -y "${missing[@]}" ca-certificates xz
   elif need_cmd yum; then
-    $sudo_cmd yum install -y "${missing[@]}" ca-certificates
+    $sudo_cmd yum install -y "${missing[@]}" ca-certificates xz
   elif need_cmd apk; then
-    $sudo_cmd apk add --no-cache "${missing[@]}" ca-certificates
+    $sudo_cmd apk add --no-cache "${missing[@]}" ca-certificates xz
+  elif need_cmd pacman; then
+    $sudo_cmd pacman -Sy --noconfirm "${missing[@]}" ca-certificates xz
+  elif need_cmd zypper; then
+    $sudo_cmd zypper install -y "${missing[@]}" ca-certificates xz
   else
     fatal "无法识别包管理器。请手动安装：${missing[*]}。"
   fi
 }
 
 install_basic_deps() {
-  need_cmd bash || fatal "未检测到 bash。"
+  if ! need_cmd bash; then
+    if [[ -f /etc/alpine-release ]]; then
+      fatal "Alpine Linux 默认不含 bash。请先执行：apk add bash"
+    else
+      fatal "未检测到 bash。"
+    fi
+  fi
+  need_cmd tar || fatal "未检测到 tar，无法解压 Node.js 归档。请先安装 tar。"
   if [[ "$os_name" == "linux" ]]; then
     install_basic_deps_linux
   else
