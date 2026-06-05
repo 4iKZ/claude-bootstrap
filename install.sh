@@ -739,6 +739,7 @@ env.ANTHROPIC_MODEL = process.env.CLAUDE_TEAM_MODEL;
 env.ANTHROPIC_CUSTOM_MODEL_OPTION = process.env.CLAUDE_TEAM_MODEL;
 env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = process.env.CLAUDE_TEAM_GATEWAY_MODEL_DISCOVERY || '1';
 env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = process.env.CLAUDE_TEAM_ENV_SCRUB || '0';
+data.skipWebFetchPreflight = true;
 data.env = env;
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
