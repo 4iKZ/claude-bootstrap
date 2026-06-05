@@ -1,4 +1,4 @@
-﻿# Claude Code Bootstrap for Windows v1.2
+# Claude Code Bootstrap for Windows v1.2
 # Target: Windows 10+ / Windows Server 2019+
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File install.ps1
@@ -6,6 +6,21 @@
 #   $env:BOOTSTRAP_BASE_URL="https://your-gateway.example.com"; powershell -ExecutionPolicy Bypass -File install.ps1
 
 #Requires -Version 5.1
+
+# Self-healing UTF-8 encoding for Windows PowerShell 5.1
+# -File: PS 5.1 reads source as ANSI (Chinese garbled); we re-read as UTF-8
+# irm|iex: $MyInvocation is empty, so this block is skipped (content is already correct)
+if ($PSVersionTable.PSVersion.Major -le 5 -and $MyInvocation.MyCommand.Path -and $env:_CLBS_RERUN -ne '1') {
+    $bytes = [System.IO.File]::ReadAllBytes($MyInvocation.MyCommand.Path)
+    if ($bytes.Length -gt 0 -and $bytes[0] -ne 0xEF) {
+        $env:_CLBS_RERUN = '1'
+        $scriptBlock = [ScriptBlock]::Create([System.Text.Encoding]::UTF8.GetString($bytes))
+        & $scriptBlock @args
+        Remove-Item env:_CLBS_RERUN -ErrorAction SilentlyContinue
+        exit
+    }
+}
+
 $ErrorActionPreference = "Stop"
 
 #######################################
@@ -117,7 +132,16 @@ function Test-Platform {
 
 # ----- memory -------------------------------------------------------------
 function Test-Memory {
-    $totalMemBytes = (Get-CimInstance -ClassName Win32_ComputerSystem).TotalPhysicalMemory
+    try {
+        $totalMemBytes = (Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory
+    } catch {
+        try {
+            $totalMemBytes = (Get-WmiObject -Class Win32_ComputerSystem).TotalPhysicalMemory
+        } catch {
+            warn "无法获取内存信息，跳过内存检查。"
+            return
+        }
+    }
     $memMB = [math]::Floor($totalMemBytes / 1MB)
     if ($memMB -lt 4096) {
         warn "当前内存约 ${memMB}MB，Claude Code 官方建议至少 4GB RAM。脚本会继续。"
