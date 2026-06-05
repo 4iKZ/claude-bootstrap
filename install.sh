@@ -911,7 +911,7 @@ Claude Code 团队安装配置完成
   $profile_file
 
 请执行以下命令让当前终端立即生效：
-  source "$profile_file"
+  source $profile_file
   hash -r
 
 启动 Claude Code：
