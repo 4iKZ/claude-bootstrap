@@ -500,6 +500,7 @@ try {
 } catch {
   process.exit(2);
 }
+raw = raw.replace(/^\uFEFF/, '');
 let json;
 try {
   json = JSON.parse(raw);
@@ -546,15 +547,17 @@ prepare_model_menu() {
   local auth_mode="$2"
   local secret="$3"
   local line=""
+  local models_tmp=""
   AVAILABLE_MODELS=()
   MODEL_MENU=()
 
-  if fetch_model_ids_from_gateway "$base_url" "$auth_mode" "$secret" > /tmp/claude-code-models.$$; then
+  models_tmp="$(mktemp)"
+  if fetch_model_ids_from_gateway "$base_url" "$auth_mode" "$secret" > "$models_tmp"; then
     while IFS= read -r line; do
       [[ -n "$line" ]] && AVAILABLE_MODELS+=("$line")
-    done < /tmp/claude-code-models.$$
+    done < "$models_tmp"
   fi
-  rm -f /tmp/claude-code-models.$$ 2>/dev/null || true
+  rm -f "$models_tmp" 2>/dev/null || true
 
   if [[ ${#AVAILABLE_MODELS[@]} -gt 0 ]]; then
     success "已从网关获取 ${#AVAILABLE_MODELS[@]} 个可用模型。"
@@ -867,7 +870,7 @@ validate_gateway() {
   case "$code" in
     200|201|202)
       success "网关认证通过，/v1/models 返回 HTTP $code。"
-      if grep -q "${model}" "$tmp" 2>/dev/null; then
+      if grep -Fq -- "$model" "$tmp" 2>/dev/null; then
         success "模型列表中检测到当前模型：$model"
       else
         warn "模型列表中未直接匹配到 $model。若 API 网关使用映射模型名，可忽略。"
