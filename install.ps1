@@ -521,6 +521,7 @@ try {
 } catch {
   process.exit(2);
 }
+raw = raw.replace(/^\uFEFF/, '');
 let json;
 try {
   json = JSON.parse(raw);

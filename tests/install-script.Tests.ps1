@@ -43,4 +43,9 @@ Assert-Contains `
     -Pattern 'if\s*\(\s*\$_.Exception.Response\s*\)' `
     -Message "Gateway error handling should check Exception.Response before reading StatusCode."
 
+Assert-Contains `
+    -Text $source `
+    -Pattern 'raw\s*=\s*raw\.replace\(/\^\\uFEFF/' `
+    -Message "Node model-list parsing should strip a UTF-8 BOM before JSON.parse."
+
 Write-Host "install-script.Tests.ps1 passed"
