@@ -58,10 +58,24 @@ $PROFILE_MARKER_BEGIN = "# >>> claude-bootstrap >>>"
 $PROFILE_MARKER_END   = "# <<< claude-bootstrap <<<"
 
 # ----- helpers -----------------------------------------------------------
-function info    { Write-Host "[INFO]  $args" -ForegroundColor Blue }
-function success { Write-Host "[OK]    $args" -ForegroundColor Green }
-function warn    { Write-Host "[WARN]  $args" -ForegroundColor Yellow }
-function fatal   { Write-Host "[ERROR] $args" -ForegroundColor Red; exit 1 }
+function Write-LogLine {
+    param(
+        [string]$Prefix,
+        [ConsoleColor]$Color,
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [object[]]$Message
+    )
+
+    $text = ($Message | ForEach-Object {
+        if ($null -eq $_) { "" } else { [string]$_ }
+    }) -join " "
+    Write-Host "$Prefix$text" -ForegroundColor $Color
+}
+
+function info    { param([Parameter(ValueFromRemainingArguments = $true)][object[]]$Message) Write-LogLine "[INFO]  " Blue @Message }
+function success { param([Parameter(ValueFromRemainingArguments = $true)][object[]]$Message) Write-LogLine "[OK]    " Green @Message }
+function warn    { param([Parameter(ValueFromRemainingArguments = $true)][object[]]$Message) Write-LogLine "[WARN]  " Yellow @Message }
+function fatal   { param([Parameter(ValueFromRemainingArguments = $true)][object[]]$Message) Write-LogLine "[ERROR] " Red @Message; exit 1 }
 
 function need_cmd {
     param([string]$Name)
@@ -478,7 +492,10 @@ function Fetch-ModelIdsFromGateway {
         }
         [System.IO.File]::WriteAllText($tmpFile, $response.Content, [System.Text.Encoding]::UTF8)
     } catch {
-        $statusCode = $_.Exception.Response.StatusCode.value__
+        $statusCode = $null
+        if ($_.Exception.Response) {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+        }
         if ($statusCode) {
             if ($statusCode -eq 401 -or $statusCode -eq 403) {
                 warn "/v1/models 返回 HTTP ${statusCode}，认证可能失败，无法拉取模型列表。"
@@ -863,7 +880,10 @@ function Test-Gateway {
             warn "网关返回 HTTP ${httpCode}。响应已忽略，脚本会继续。"
         }
     } catch {
-        $statusCode = $_.Exception.Response.StatusCode.value__
+        $statusCode = $null
+        if ($_.Exception.Response) {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+        }
         if ($statusCode) {
             if ($statusCode -eq 401 -or $statusCode -eq 403) {
                 warn "网关返回 HTTP ${statusCode}，API Key/Auth Token 可能不可用。"
