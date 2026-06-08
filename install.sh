@@ -50,15 +50,25 @@ fatal() { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+read_user_input() {
+  if [[ -t 0 ]]; then
+    read "$@"
+  elif [[ -r /dev/tty ]]; then
+    read "$@" </dev/tty
+  else
+    read "$@"
+  fi
+}
+
 confirm() {
   local prompt="$1"
   local default="${2:-Y}"
   local reply=""
   if [[ "$default" == "Y" ]]; then
-    read -r -p "$prompt [Y/n]: " reply || true
+    read_user_input -r -p "$prompt [Y/n]: " reply || true
     [[ -z "$reply" || "$reply" =~ ^[Yy]$ ]]
   else
-    read -r -p "$prompt [y/N]: " reply || true
+    read_user_input -r -p "$prompt [y/N]: " reply || true
     [[ "$reply" =~ ^[Yy]$ ]]
   fi
 }
@@ -394,20 +404,20 @@ read_api_secret() {
   local value="" value2=""
   while true; do
     printf "请输入 API Key / Auth Token：" >&2
-    if read -r -s value; then
+    if read_user_input -r -s value; then
       printf "\n" >&2
     else
-      read -r value
+      read_user_input -r value
     fi
     if [[ -z "$value" ]]; then
       warn "API Key 不能为空。"
       continue
     fi
     printf "请再次输入确认：" >&2
-    if read -r -s value2; then
+    if read_user_input -r -s value2; then
       printf "\n" >&2
     else
-      read -r value2
+      read_user_input -r value2
     fi
     if [[ "$value" != "$value2" ]]; then
       warn "两次输入不一致，请重新输入。"
@@ -424,7 +434,7 @@ choose_auth_mode() {
   printf "  1) ANTHROPIC_AUTH_TOKEN  作为 Authorization: Bearer <token> 发送，通常适合 API 网关 / 中转服务 [默认]\n" >&2
   printf "  2) ANTHROPIC_API_KEY     作为 X-Api-Key 发送，通常适合原生 Anthropic API\n" >&2
   printf "请输入编号 [1]: " >&2
-  read -r choice || true
+  read_user_input -r choice || true
   choice="${choice:-1}"
   case "$choice" in
     1) printf 'auth_token' ;;
@@ -584,7 +594,7 @@ filter_model_menu_if_needed() {
 检测到模型数量较多：%d 个。
 " "$count" >&2
   printf "请输入筛选关键词，例如 claude、sonnet、qwen、code；直接回车显示前 %s 个：" "$MODEL_MENU_MAX_DISPLAY" >&2
-  read -r keyword || true
+  read_user_input -r keyword || true
   keyword="${keyword:-}"
 
   if [[ -n "$keyword" ]]; then
@@ -646,7 +656,7 @@ choose_model() {
   printf "  %d) 手动输入模型名
 " "$(( display_count + 1 ))" >&2
   printf "请输入编号 [$DEFAULT_MODEL_INDEX]: " >&2
-  read -r choice || true
+  read_user_input -r choice || true
   choice="${choice:-$DEFAULT_MODEL_INDEX}"
 
   if [[ "$choice" =~ ^[0-9]+$ ]]; then
@@ -655,7 +665,7 @@ choose_model() {
       return
     elif (( choice == display_count + 1 )); then
       printf "请输入模型名：" >&2
-      read -r custom
+      read_user_input -r custom
       [[ -n "$custom" ]] || fatal "模型名不能为空。"
       printf '%s' "$custom"
       return
@@ -676,10 +686,10 @@ ask_base_url() {
   local maybe=""
   if [[ -z "$url" ]]; then
     printf "请输入 ANTHROPIC_BASE_URL（API 网关根地址，不需要追加 /v1、/v1/messages 或其他路径），例如 https://api.example.com: " >&2
-    read -r url
+    read_user_input -r url
   else
     printf "ANTHROPIC_BASE_URL 使用 %s（只需要网关根地址，不需要追加 /v1、/v1/messages 或其他路径），是否修改？直接回车表示不修改：" "$url" >&2
-    read -r maybe || true
+    read_user_input -r maybe || true
     if [[ -n "${maybe:-}" ]]; then
       url="$maybe"
     fi
@@ -959,8 +969,6 @@ main() {
   check_memory
   setup_sudo
   install_basic_deps
-  # Ensure stdin is a TTY for interactive prompts (handles curl|bash pipe case)
-  [[ -t 0 ]] || exec 0</dev/tty
   ensure_node22
   install_claude_code
   configure_claude
