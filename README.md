@@ -25,7 +25,7 @@
 ### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.sh | bash
+bash -c 'set -euo pipefail; if ! command -v curl >/dev/null; then SUDO=sudo; [ "$(id -u)" -eq 0 ] && SUDO=; if command -v apt-get >/dev/null; then $SUDO apt-get update; $SUDO apt-get install -y curl ca-certificates; elif command -v dnf >/dev/null; then $SUDO dnf install -y curl ca-certificates; elif command -v yum >/dev/null; then $SUDO yum install -y curl ca-certificates; elif command -v apk >/dev/null; then $SUDO apk add --no-cache curl ca-certificates; elif command -v pacman >/dev/null; then $SUDO pacman -Sy --noconfirm curl ca-certificates; elif command -v zypper >/dev/null; then $SUDO zypper install -y curl ca-certificates; else echo "未检测到 curl，且无法识别包管理器，请先手动安装 curl。"; exit 1; fi; fi; curl -fsSL https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.sh | bash'
 ```
 
 ### Windows
