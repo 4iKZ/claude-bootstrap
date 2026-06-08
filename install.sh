@@ -210,10 +210,27 @@ load_nvm() {
 
 install_nvm() {
   if load_nvm; then
+    success "nvm 已安装并可加载：$NVM_DIR"
     return
   fi
+  local install_url="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
+  local tmp
+  tmp="$(mktemp)"
   info "安装 nvm $NVM_VERSION"
-  curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | bash
+  info "下载 nvm 安装脚本：$install_url"
+  if ! curl -fsSL --connect-timeout 10 --max-time 60 "$install_url" -o "$tmp"; then
+    rm -f "$tmp"
+    fatal "下载 nvm 安装脚本失败。请检查 raw.githubusercontent.com 网络连通性，或稍后重试。"
+  fi
+  info "nvm 安装脚本下载完成：$tmp ($(wc -c < "$tmp" | tr -d ' ') bytes)"
+  info "执行 nvm 安装脚本"
+  bash "$tmp" || {
+    local install_rc=$?
+    rm -f "$tmp"
+    fatal "nvm 安装脚本执行失败，退出码：$install_rc"
+  }
+  rm -f "$tmp"
+  info "重新加载 nvm：$NVM_DIR/nvm.sh"
   load_nvm || fatal "nvm 安装后仍无法加载，请重新打开终端后重试。"
 }
 
@@ -247,9 +264,12 @@ ensure_node22() {
 
   install_nvm
   info "通过 nvm 安装/切换 Node.js $REQUIRED_NODE_MAJOR"
-  nvm install "$REQUIRED_NODE_MAJOR"
-  nvm alias default "$REQUIRED_NODE_MAJOR" >/dev/null
-  nvm use "$REQUIRED_NODE_MAJOR" >/dev/null
+  info "执行：nvm install $REQUIRED_NODE_MAJOR"
+  nvm install "$REQUIRED_NODE_MAJOR" || fatal "nvm install $REQUIRED_NODE_MAJOR 失败。请查看上方 nvm 输出。"
+  info "执行：nvm alias default $REQUIRED_NODE_MAJOR"
+  nvm alias default "$REQUIRED_NODE_MAJOR" >/dev/null || fatal "nvm alias default $REQUIRED_NODE_MAJOR 失败。"
+  info "执行：nvm use $REQUIRED_NODE_MAJOR"
+  nvm use "$REQUIRED_NODE_MAJOR" >/dev/null || fatal "nvm use $REQUIRED_NODE_MAJOR 失败。请查看上方 nvm 输出。"
   success "Node.js 已就绪：$(node -v)，npm：$(npm -v)"
 }
 
