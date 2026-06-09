@@ -18,7 +18,8 @@ ENABLE_GATEWAY_MODEL_DISCOVERY="${ENABLE_GATEWAY_MODEL_DISCOVERY:-1}"
 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT="${CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT:-0}"
 NVM_VERSION="${NVM_VERSION:-v0.40.3}"
 REQUIRED_NODE_MAJOR="${REQUIRED_NODE_MAJOR:-22}"
-CLAUDE_NPM_PACKAGE="@anthropic-ai/claude-code@2.1.142"
+CLAUDE_CODE_TARGET_VERSION="2.1.142"
+CLAUDE_NPM_PACKAGE="@anthropic-ai/claude-code@$CLAUDE_CODE_TARGET_VERSION"
 MODEL_MENU_MAX_DISPLAY="${MODEL_MENU_MAX_DISPLAY:-30}"
 DYNAMIC_MODEL_DISCOVERY="${DYNAMIC_MODEL_DISCOVERY:-1}"
 
@@ -325,15 +326,33 @@ find_real_claude_bin() {
   return 1
 }
 
+extract_claude_version() {
+  local version_text="$1"
+  if [[ "$version_text" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
 install_claude_code() {
   ensure_npm_global_path
 
   local real_claude=""
   real_claude="$(find_real_claude_bin || true)"
   if [[ -n "$real_claude" ]]; then
-    success "Claude Code 已安装：$($real_claude --version 2>/dev/null || printf 'version unknown')"
-    export CLAUDE_TEAM_REAL_BIN="$real_claude"
-    return
+    local installed_version_text=""
+    local current_version=""
+    installed_version_text="$($real_claude --version 2>/dev/null || printf 'version unknown')"
+    current_version="$(extract_claude_version "$installed_version_text")"
+    if [[ "$current_version" == "$CLAUDE_CODE_TARGET_VERSION" ]]; then
+      success "Claude Code 已安装：$installed_version_text"
+      export CLAUDE_TEAM_REAL_BIN="$real_claude"
+      return
+    fi
+    if [[ -n "$current_version" ]]; then
+      warn "Claude Code 版本不匹配：当前 $installed_version_text，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
+    else
+      warn "Claude Code 已安装但无法识别版本：$installed_version_text，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
+    fi
   fi
 
   info "安装 Claude Code：npm install -g $CLAUDE_NPM_PACKAGE"

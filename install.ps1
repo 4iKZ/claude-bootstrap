@@ -32,7 +32,8 @@ $CREATE_CLAUDE_WRAPPER      = if (Test-Path env:CREATE_CLAUDE_WRAPPER) { $env:CR
 $ENABLE_GATEWAY_MODEL_DISCOVERY = if (Test-Path env:ENABLE_GATEWAY_MODEL_DISCOVERY) { $env:ENABLE_GATEWAY_MODEL_DISCOVERY } else { "1" }
 $CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT = if (Test-Path env:CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT) { $env:CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT } else { "0" }
 $REQUIRED_NODE_MAJOR        = if (Test-Path env:REQUIRED_NODE_MAJOR) { $env:REQUIRED_NODE_MAJOR } else { "22" }
-$CLAUDE_NPM_PACKAGE         = "@anthropic-ai/claude-code@2.1.142"
+$CLAUDE_CODE_TARGET_VERSION = "2.1.142"
+$CLAUDE_NPM_PACKAGE         = "@anthropic-ai/claude-code@$CLAUDE_CODE_TARGET_VERSION"
 $MODEL_MENU_MAX_DISPLAY     = if (Test-Path env:MODEL_MENU_MAX_DISPLAY) { [int]$env:MODEL_MENU_MAX_DISPLAY } else { 30 }
 $DYNAMIC_MODEL_DISCOVERY    = if (Test-Path env:DYNAMIC_MODEL_DISCOVERY) { $env:DYNAMIC_MODEL_DISCOVERY } else { "1" }
 
@@ -358,6 +359,15 @@ function Find-RealClaudeBin {
     return $null
 }
 
+function Get-ClaudeVersionFromOutput {
+    param([string]$VersionText)
+
+    if ($VersionText -match '([0-9]+\.[0-9]+\.[0-9]+)') {
+        return $Matches[1]
+    }
+    return ""
+}
+
 # ----- install Claude Code ------------------------------------------------
 function Install-ClaudeCode {
     Enable-NpmGlobalPath
@@ -366,9 +376,17 @@ function Install-ClaudeCode {
     if ($realClaude) {
         $ver = & $realClaude --version 2>$null
         if (-not $ver) { $ver = "version unknown" }
-        success "Claude Code 已安装：$ver"
-        $global:CLAUDE_BOOTSTRAP_REAL_BIN = $realClaude
-        return
+        $currentVersion = Get-ClaudeVersionFromOutput $ver
+        if ($currentVersion -eq $CLAUDE_CODE_TARGET_VERSION) {
+            success "Claude Code 已安装：$ver"
+            $global:CLAUDE_BOOTSTRAP_REAL_BIN = $realClaude
+            return
+        }
+        if ($currentVersion) {
+            warn "Claude Code 版本不匹配：当前 $ver，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
+        } else {
+            warn "Claude Code 已安装但无法识别版本：$ver，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
+        }
     }
 
     info "安装 Claude Code：npm install -g $CLAUDE_NPM_PACKAGE"
