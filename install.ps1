@@ -360,15 +360,6 @@ function Find-RealClaudeBin {
     return $null
 }
 
-function Get-ClaudeVersionFromOutput {
-    param([string]$VersionText)
-
-    if ($VersionText -match '([0-9]+\.[0-9]+\.[0-9]+)') {
-        return $Matches[1]
-    }
-    return ""
-}
-
 function Clear-ClaudeNpmTempDirs {
     $npmRoot = (& npm root -g 2>$null) -join "`n"
     $npmRoot = $npmRoot.Trim()
@@ -381,6 +372,23 @@ function Clear-ClaudeNpmTempDirs {
         warn "清理 Claude Code npm 临时目录：$($_.FullName)"
         Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Get-InstalledClaudeNpmVersion {
+    $json = (& npm list -g $CLAUDE_NPM_PACKAGE_NAME --depth=0 --json 2>$null) -join "`n"
+    if (-not $json) { return "" }
+
+    try {
+        $data = $json | ConvertFrom-Json
+        if (-not $data.dependencies) { return "" }
+        $dep = $data.dependencies.PSObject.Properties[$CLAUDE_NPM_PACKAGE_NAME].Value
+        if ($dep -and $dep.version) {
+            return [string]$dep.version
+        }
+    } catch {
+        return ""
+    }
+    return ""
 }
 
 function Install-ClaudeNpmPackage {
@@ -403,18 +411,16 @@ function Install-ClaudeCode {
 
     $realClaude = Find-RealClaudeBin
     if ($realClaude) {
-        $ver = & $realClaude --version 2>$null
-        if (-not $ver) { $ver = "version unknown" }
-        $currentVersion = Get-ClaudeVersionFromOutput $ver
+        $currentVersion = Get-InstalledClaudeNpmVersion
         if ($currentVersion -eq $CLAUDE_CODE_TARGET_VERSION) {
-            success "Claude Code 已安装：$ver"
+            success "Claude Code 已安装：$currentVersion (npm)"
             $global:CLAUDE_BOOTSTRAP_REAL_BIN = $realClaude
             return
         }
         if ($currentVersion) {
-            warn "Claude Code 版本不匹配：当前 $ver，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
+            warn "Claude Code 版本不匹配：当前 $currentVersion (npm)，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
         } else {
-            warn "Claude Code 已安装但无法识别版本：$ver，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
+            warn "Claude Code 已安装但无法从 npm 识别版本，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
         }
     }
 
@@ -431,9 +437,13 @@ function Install-ClaudeCode {
         fatal "Claude Code 安装完成，但真实 claude 命令仍不在 PATH。请检查 npm 全局目录：${npmPrefix}。"
     }
     $global:CLAUDE_BOOTSTRAP_REAL_BIN = $realClaude
-    $ver = & $realClaude --version 2>$null
-    if (-not $ver) { $ver = "version unknown" }
-    success "Claude Code 安装成功：$ver"
+    $installedVersion = Get-InstalledClaudeNpmVersion
+    if ($installedVersion -ne $CLAUDE_CODE_TARGET_VERSION) {
+        $displayVersion = $installedVersion
+        if (-not $displayVersion) { $displayVersion = "unknown" }
+        fatal "Claude Code 安装后版本不符合预期：$displayVersion，目标 $CLAUDE_CODE_TARGET_VERSION。"
+    }
+    success "Claude Code 安装成功：$installedVersion (npm)"
 }
 
 # ----- profile -------------------------------------------------------------

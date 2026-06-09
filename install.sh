@@ -327,13 +327,6 @@ find_real_claude_bin() {
   return 1
 }
 
-extract_claude_version() {
-  local version_text="$1"
-  if [[ "$version_text" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
-    printf '%s' "${BASH_REMATCH[1]}"
-  fi
-}
-
 cleanup_claude_npm_temp_dirs() {
   local npm_root=""
   local scope_dir=""
@@ -366,25 +359,42 @@ install_claude_npm_package() {
   npm install -g "$CLAUDE_NPM_PACKAGE"
 }
 
+get_installed_claude_npm_version() {
+  npm list -g "$CLAUDE_NPM_PACKAGE_NAME" --depth=0 --json 2>/dev/null | node -e '
+const packageName = process.argv[1];
+let input = "";
+process.stdin.on("data", chunk => {
+  input += chunk;
+});
+process.stdin.on("end", () => {
+  try {
+    const data = JSON.parse(input || "{}");
+    const dep = data.dependencies && data.dependencies[packageName];
+    if (dep && dep.version) process.stdout.write(dep.version);
+  } catch {
+    // No version available.
+  }
+});
+' "$CLAUDE_NPM_PACKAGE_NAME"
+}
+
 install_claude_code() {
   ensure_npm_global_path
 
   local real_claude=""
   real_claude="$(find_real_claude_bin || true)"
   if [[ -n "$real_claude" ]]; then
-    local installed_version_text=""
     local current_version=""
-    installed_version_text="$($real_claude --version 2>/dev/null || printf 'version unknown')"
-    current_version="$(extract_claude_version "$installed_version_text")"
+    current_version="$(get_installed_claude_npm_version || true)"
     if [[ "$current_version" == "$CLAUDE_CODE_TARGET_VERSION" ]]; then
-      success "Claude Code 已安装：$installed_version_text"
+      success "Claude Code 已安装：$current_version (npm)"
       export CLAUDE_TEAM_REAL_BIN="$real_claude"
       return
     fi
     if [[ -n "$current_version" ]]; then
-      warn "Claude Code 版本不匹配：当前 $installed_version_text，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
+      warn "Claude Code 版本不匹配：当前 $current_version (npm)，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
     else
-      warn "Claude Code 已安装但无法识别版本：$installed_version_text，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
+      warn "Claude Code 已安装但无法从 npm 识别版本，目标 $CLAUDE_CODE_TARGET_VERSION，将重新安装。"
     fi
   fi
 
@@ -400,7 +410,10 @@ install_claude_code() {
   real_claude="$(find_real_claude_bin || true)"
   [[ -n "$real_claude" ]] || fatal "Claude Code 安装完成，但真实 claude 命令仍不在 PATH。请检查 npm 全局 bin 目录：${bin:-unknown}。"
   export CLAUDE_TEAM_REAL_BIN="$real_claude"
-  success "Claude Code 安装成功：$($real_claude --version 2>/dev/null || printf 'version unknown')"
+  local installed_version=""
+  installed_version="$(get_installed_claude_npm_version || true)"
+  [[ "$installed_version" == "$CLAUDE_CODE_TARGET_VERSION" ]] || fatal "Claude Code 安装后版本不符合预期：${installed_version:-unknown}，目标 $CLAUDE_CODE_TARGET_VERSION。"
+  success "Claude Code 安装成功：$installed_version (npm)"
 }
 
 select_profile_file() {
