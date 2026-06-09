@@ -84,7 +84,8 @@ $env:BOOTSTRAP_BASE_URL="https://api.example.com"; iex (irm https://raw.githubus
 | `ENABLE_GATEWAY_MODEL_DISCOVERY`           | `1`                                | 是否从网关动态拉取模型列表          |
 | `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT` | `0`                                | 子进程环境清理策略                  |
 | `REQUIRED_NODE_MAJOR`                      | `22`                               | 目标 Node.js 主版本号               |
-| `CLAUDE_NPM_PACKAGE`                       | `@anthropic-ai/claude-code@latest` | Claude Code npm 包名                |
+
+Claude Code npm 包固定为 `@anthropic-ai/claude-code@2.1.142`。脚本会写入 `DISABLE_UPDATES=1`，避免固定版本被 Claude Code 自更新覆盖。
 
 ---
 
@@ -113,7 +114,7 @@ $env:BOOTSTRAP_BASE_URL="https://api.example.com"; iex (irm https://raw.githubus
 安装 Node.js 22（通过 nvm）
         │
         ▼
-npm install -g @anthropic-ai/claude-code
+npm install -g @anthropic-ai/claude-code@2.1.142
         │
         ▼
 交互式配置 → 写入配置 → 连通性验证 → 打印摘要
@@ -137,7 +138,7 @@ npm install -g @anthropic-ai/claude-code
 安装 fnm + Node.js 22
         │
         ▼
-npm install -g @anthropic-ai/claude-code
+npm install -g @anthropic-ai/claude-code@2.1.142
         │
         ▼
 交互式配置 → 写入配置 → 连通性验证 → 打印摘要

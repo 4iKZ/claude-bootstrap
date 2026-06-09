@@ -18,7 +18,7 @@ ENABLE_GATEWAY_MODEL_DISCOVERY="${ENABLE_GATEWAY_MODEL_DISCOVERY:-1}"
 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT="${CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT:-0}"
 NVM_VERSION="${NVM_VERSION:-v0.40.3}"
 REQUIRED_NODE_MAJOR="${REQUIRED_NODE_MAJOR:-22}"
-CLAUDE_NPM_PACKAGE="${CLAUDE_NPM_PACKAGE:-@anthropic-ai/claude-code@latest}"
+CLAUDE_NPM_PACKAGE="@anthropic-ai/claude-code@2.1.142"
 MODEL_MENU_MAX_DISPLAY="${MODEL_MENU_MAX_DISPLAY:-30}"
 DYNAMIC_MODEL_DISCOVERY="${DYNAMIC_MODEL_DISCOVERY:-1}"
 
@@ -744,6 +744,7 @@ write_env_file() {
     printf 'export ANTHROPIC_CUSTOM_MODEL_OPTION=%s\n' "$(shell_quote "$model")"
     printf 'export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=%s\n' "$(shell_quote "$ENABLE_GATEWAY_MODEL_DISCOVERY")"
     printf 'export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=%s\n' "$(shell_quote "$CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT")"
+    printf 'export DISABLE_UPDATES=1\n'
   } > "$tmp"
   cat "$tmp" > "$ENV_FILE"
   rm -f "$tmp"
@@ -797,6 +798,7 @@ env.ANTHROPIC_MODEL = process.env.CLAUDE_TEAM_MODEL;
 env.ANTHROPIC_CUSTOM_MODEL_OPTION = process.env.CLAUDE_TEAM_MODEL;
 env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = process.env.CLAUDE_TEAM_GATEWAY_MODEL_DISCOVERY || '1';
 env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = process.env.CLAUDE_TEAM_ENV_SCRUB || '0';
+env.DISABLE_UPDATES = '1';
 if (data.skipWebFetchPreflight === undefined) data.skipWebFetchPreflight = true;
 data.env = env;
 fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -978,6 +980,7 @@ Claude Code 安装配置完成
 
 注意：
   - API Key/Auth Token 已写入 $ENV_FILE 和 $CLAUDE_SETTINGS_JSON，并设置为 chmod 600。
+  - Claude Code 固定安装 $CLAUDE_NPM_PACKAGE，并写入 DISABLE_UPDATES=1 防止自更新覆盖。
   - 默认 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0，避免 Linux/LXC 缺少 bubblewrap 时启动失败。
   - 如果你是通过 curl | bash 执行，脚本无法直接修改父 shell 环境；建议执行 source 配置文件或重新打开终端。
 ============================================================

@@ -32,7 +32,7 @@ $CREATE_CLAUDE_WRAPPER      = if (Test-Path env:CREATE_CLAUDE_WRAPPER) { $env:CR
 $ENABLE_GATEWAY_MODEL_DISCOVERY = if (Test-Path env:ENABLE_GATEWAY_MODEL_DISCOVERY) { $env:ENABLE_GATEWAY_MODEL_DISCOVERY } else { "1" }
 $CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT = if (Test-Path env:CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT) { $env:CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT } else { "0" }
 $REQUIRED_NODE_MAJOR        = if (Test-Path env:REQUIRED_NODE_MAJOR) { $env:REQUIRED_NODE_MAJOR } else { "22" }
-$CLAUDE_NPM_PACKAGE         = if (Test-Path env:CLAUDE_NPM_PACKAGE) { $env:CLAUDE_NPM_PACKAGE } else { "@anthropic-ai/claude-code@latest" }
+$CLAUDE_NPM_PACKAGE         = "@anthropic-ai/claude-code@2.1.142"
 $MODEL_MENU_MAX_DISPLAY     = if (Test-Path env:MODEL_MENU_MAX_DISPLAY) { [int]$env:MODEL_MENU_MAX_DISPLAY } else { 30 }
 $DYNAMIC_MODEL_DISCOVERY    = if (Test-Path env:DYNAMIC_MODEL_DISCOVERY) { $env:DYNAMIC_MODEL_DISCOVERY } else { "1" }
 
@@ -704,6 +704,7 @@ function Write-EnvFile {
     $lines += "`$env:ANTHROPIC_CUSTOM_MODEL_OPTION = $(ConvertTo-PowerShellSingleQuotedString $Model)"
     $lines += "`$env:CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = $(ConvertTo-PowerShellSingleQuotedString $ENABLE_GATEWAY_MODEL_DISCOVERY)"
     $lines += "`$env:CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = $(ConvertTo-PowerShellSingleQuotedString $CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT)"
+    $lines += "`$env:DISABLE_UPDATES = $(ConvertTo-PowerShellSingleQuotedString "1")"
 
     $lines -join "`r`n" | Set-Content $ENV_FILE -Encoding UTF8
     success "已写入环境变量：$ENV_FILE"
@@ -754,6 +755,7 @@ env.ANTHROPIC_MODEL = process.env.CLAUDE_BOOTSTRAP_MODEL;
 env.ANTHROPIC_CUSTOM_MODEL_OPTION = process.env.CLAUDE_BOOTSTRAP_MODEL;
 env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = process.env.CLAUDE_BOOTSTRAP_GATEWAY_MODEL_DISCOVERY || '1';
 env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = process.env.CLAUDE_BOOTSTRAP_ENV_SCRUB || '0';
+env.DISABLE_UPDATES = '1';
 data.skipWebFetchPreflight = true;
 data.env = env;
 fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -974,6 +976,7 @@ Claude Code 安装配置完成
 
 注意：
   - API Key/Auth Token 已写入 $ENV_FILE 和 ${CLAUDE_SETTINGS_JSON}。
+  - Claude Code 固定安装 $CLAUDE_NPM_PACKAGE，并写入 DISABLE_UPDATES=1 防止自更新覆盖。
   - 默认 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0，避免 Windows 缺少 bubblewrap 时启动失败。
   - 如果安全策略限制脚本执行，请使用 powershell -ExecutionPolicy Bypass -File install.ps1 运行。
 ============================================================
