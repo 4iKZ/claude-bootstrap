@@ -33,6 +33,7 @@ $ENABLE_GATEWAY_MODEL_DISCOVERY = if (Test-Path env:ENABLE_GATEWAY_MODEL_DISCOVE
 $CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT = if (Test-Path env:CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT) { $env:CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT } else { "0" }
 $REQUIRED_NODE_MAJOR        = if (Test-Path env:REQUIRED_NODE_MAJOR) { $env:REQUIRED_NODE_MAJOR } else { "22" }
 $CLAUDE_CODE_TARGET_VERSION = "2.1.142"
+$CLAUDE_NPM_PACKAGE_NAME    = "@anthropic-ai/claude-code"
 $CLAUDE_NPM_PACKAGE         = "@anthropic-ai/claude-code@$CLAUDE_CODE_TARGET_VERSION"
 $MODEL_MENU_MAX_DISPLAY     = if (Test-Path env:MODEL_MENU_MAX_DISPLAY) { [int]$env:MODEL_MENU_MAX_DISPLAY } else { 30 }
 $DYNAMIC_MODEL_DISCOVERY    = if (Test-Path env:DYNAMIC_MODEL_DISCOVERY) { $env:DYNAMIC_MODEL_DISCOVERY } else { "1" }
@@ -368,6 +369,34 @@ function Get-ClaudeVersionFromOutput {
     return ""
 }
 
+function Clear-ClaudeNpmTempDirs {
+    $npmRoot = (& npm root -g 2>$null) -join "`n"
+    $npmRoot = $npmRoot.Trim()
+    if (-not $npmRoot) { return }
+
+    $scopeDir = Join-Path $npmRoot "@anthropic-ai"
+    if (-not (Test-Path $scopeDir)) { return }
+
+    Get-ChildItem -LiteralPath $scopeDir -Force -Directory -Filter ".claude-code-*" -ErrorAction SilentlyContinue | ForEach-Object {
+        warn "清理 Claude Code npm 临时目录：$($_.FullName)"
+        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Install-ClaudeNpmPackage {
+    Clear-ClaudeNpmTempDirs
+    npm install -g $CLAUDE_NPM_PACKAGE
+    if ($LASTEXITCODE -eq 0) { return }
+
+    warn "Claude Code npm 安装失败，清理旧包和 npm 临时目录后重试一次。"
+    npm uninstall -g $CLAUDE_NPM_PACKAGE_NAME | Out-Null
+    Clear-ClaudeNpmTempDirs
+    npm install -g $CLAUDE_NPM_PACKAGE
+    if ($LASTEXITCODE -ne 0) {
+        fatal "Claude Code npm 安装失败，请查看 npm 日志。"
+    }
+}
+
 # ----- install Claude Code ------------------------------------------------
 function Install-ClaudeCode {
     Enable-NpmGlobalPath
@@ -390,7 +419,7 @@ function Install-ClaudeCode {
     }
 
     info "安装 Claude Code：npm install -g $CLAUDE_NPM_PACKAGE"
-    npm install -g $CLAUDE_NPM_PACKAGE
+    Install-ClaudeNpmPackage
 
     $npmPrefix = Get-NpmGlobalBin
     if ($npmPrefix) {

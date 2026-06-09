@@ -19,6 +19,7 @@ CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT="${CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEF
 NVM_VERSION="${NVM_VERSION:-v0.40.3}"
 REQUIRED_NODE_MAJOR="${REQUIRED_NODE_MAJOR:-22}"
 CLAUDE_CODE_TARGET_VERSION="2.1.142"
+CLAUDE_NPM_PACKAGE_NAME="@anthropic-ai/claude-code"
 CLAUDE_NPM_PACKAGE="@anthropic-ai/claude-code@$CLAUDE_CODE_TARGET_VERSION"
 MODEL_MENU_MAX_DISPLAY="${MODEL_MENU_MAX_DISPLAY:-30}"
 DYNAMIC_MODEL_DISCOVERY="${DYNAMIC_MODEL_DISCOVERY:-1}"
@@ -333,6 +334,38 @@ extract_claude_version() {
   fi
 }
 
+cleanup_claude_npm_temp_dirs() {
+  local npm_root=""
+  local scope_dir=""
+  local temp_dir=""
+  npm_root="$(npm root -g 2>/dev/null || true)"
+  [[ -n "$npm_root" ]] || return 0
+  scope_dir="$npm_root/@anthropic-ai"
+  [[ -d "$scope_dir" ]] || return 0
+
+  for temp_dir in "$scope_dir"/.claude-code-*; do
+    [[ -e "$temp_dir" ]] || continue
+    case "$temp_dir" in
+      "$scope_dir"/.claude-code-*)
+        warn "清理 Claude Code npm 临时目录：$temp_dir"
+        rm -rf "$temp_dir"
+        ;;
+    esac
+  done
+}
+
+install_claude_npm_package() {
+  cleanup_claude_npm_temp_dirs
+  if npm install -g "$CLAUDE_NPM_PACKAGE"; then
+    return 0
+  fi
+
+  warn "Claude Code npm 安装失败，清理旧包和 npm 临时目录后重试一次。"
+  npm uninstall -g "$CLAUDE_NPM_PACKAGE_NAME" >/dev/null 2>&1 || true
+  cleanup_claude_npm_temp_dirs
+  npm install -g "$CLAUDE_NPM_PACKAGE"
+}
+
 install_claude_code() {
   ensure_npm_global_path
 
@@ -356,7 +389,7 @@ install_claude_code() {
   fi
 
   info "安装 Claude Code：npm install -g $CLAUDE_NPM_PACKAGE"
-  npm install -g "$CLAUDE_NPM_PACKAGE"
+  install_claude_npm_package
 
   local bin
   bin="$(npm_global_bin || true)"
