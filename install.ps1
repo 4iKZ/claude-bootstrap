@@ -60,6 +60,23 @@ $PROFILE_MARKER_BEGIN = "# >>> claude-bootstrap >>>"
 $PROFILE_MARKER_END   = "# <<< claude-bootstrap <<<"
 
 # ----- helpers -----------------------------------------------------------
+function Write-SafeHost {
+    param(
+        [AllowNull()][string]$Text = "",
+        [AllowNull()][object]$ForegroundColor = $null
+    )
+
+    try {
+        if ($null -ne $ForegroundColor) {
+            Microsoft.PowerShell.Utility\Write-Host $Text -ForegroundColor $ForegroundColor
+        } else {
+            Microsoft.PowerShell.Utility\Write-Host $Text
+        }
+    } catch {
+        [Console]::Out.WriteLine($Text)
+    }
+}
+
 function Write-LogLine {
     param(
         [string]$Prefix,
@@ -71,7 +88,7 @@ function Write-LogLine {
     $text = ($Message | ForEach-Object {
         if ($null -eq $_) { "" } else { [string]$_ }
     }) -join " "
-    Write-Host "$Prefix$text" -ForegroundColor $Color
+    Write-SafeHost "$Prefix$text" $Color
 }
 
 function ConvertTo-PowerShellSingleQuotedString {
@@ -509,10 +526,10 @@ function Read-ApiSecret {
 }
 
 function Choose-AuthMode {
-    Write-Host ""
-    Write-Host "请选择认证变量："
-    Write-Host "  1) ANTHROPIC_AUTH_TOKEN  作为 Authorization: Bearer <token> 发送，通常适合内部中转站 [默认]"
-    Write-Host "  2) ANTHROPIC_API_KEY     作为 X-Api-Key 发送，通常适合原生 Anthropic API"
+    Write-SafeHost ""
+    Write-SafeHost "请选择认证变量："
+    Write-SafeHost "  1) ANTHROPIC_AUTH_TOKEN  作为 Authorization: Bearer <token> 发送，通常适合内部中转站 [默认]"
+    Write-SafeHost "  2) ANTHROPIC_API_KEY     作为 X-Api-Key 发送，通常适合原生 Anthropic API"
     $choice = Read-Host -Prompt "请输入编号 [1]"
     if ([string]::IsNullOrEmpty($choice)) { $choice = "1" }
     switch ($choice) {
@@ -655,8 +672,8 @@ function Filter-ModelMenuIfNeeded {
     $count = $SCRIPT:MODEL_MENU.Count
     if ($count -le $MODEL_MENU_MAX_DISPLAY) { return }
 
-    Write-Host ""
-    Write-Host "检测到模型数量较多：$count 个。"
+    Write-SafeHost ""
+    Write-SafeHost "检测到模型数量较多：$count 个。"
     $keyword = Read-Host -Prompt "请输入筛选关键词，例如 claude、sonnet、qwen、code；直接回车显示前 $MODEL_MENU_MAX_DISPLAY 个"
     if ([string]::IsNullOrEmpty($keyword)) { return }
 
@@ -680,21 +697,21 @@ function Choose-Model {
     $totalCount = $SCRIPT:MODEL_MENU.Count
     $displayCount = if ($totalCount -gt $MODEL_MENU_MAX_DISPLAY) { $MODEL_MENU_MAX_DISPLAY } else { $totalCount }
 
-    Write-Host ""
-    Write-Host "请选择模型："
+    Write-SafeHost ""
+    Write-SafeHost "请选择模型："
     for ($i = 0; $i -lt $displayCount; $i++) {
         $n = $i + 1
         if ($n -eq $DEFAULT_MODEL_INDEX) {
-            Write-Host "  $n) $($SCRIPT:MODEL_MENU[$i])  [默认]"
+            Write-SafeHost "  $n) $($SCRIPT:MODEL_MENU[$i])  [默认]"
         } else {
-            Write-Host "  $n) $($SCRIPT:MODEL_MENU[$i])"
+            Write-SafeHost "  $n) $($SCRIPT:MODEL_MENU[$i])"
         }
     }
     if ($totalCount -gt $displayCount) {
-        Write-Host "  ... 已隐藏 $($totalCount - $displayCount) 个模型；可选择手动输入模型名，或重新运行脚本用关键词筛选。"
+        Write-SafeHost "  ... 已隐藏 $($totalCount - $displayCount) 个模型；可选择手动输入模型名，或重新运行脚本用关键词筛选。"
     }
     $manualNum = $displayCount + 1
-    Write-Host "  $manualNum) 手动输入模型名"
+    Write-SafeHost "  $manualNum) 手动输入模型名"
 
     $choice = Read-Host -Prompt "请输入编号 [$DEFAULT_MODEL_INDEX]"
     if ([string]::IsNullOrEmpty($choice)) { $choice = "$DEFAULT_MODEL_INDEX" }
@@ -1038,7 +1055,7 @@ Claude Code 安装配置完成
   - 如果安全策略限制脚本执行，请使用 powershell -ExecutionPolicy Bypass -File install.ps1 运行。
 ============================================================
 "@
-    Write-Host $summary -ForegroundColor Cyan
+    Write-SafeHost $summary Cyan
 }
 
 # ----- main ----------------------------------------------------------------
