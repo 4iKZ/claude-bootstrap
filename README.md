@@ -40,6 +40,31 @@ iex (irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.ps
 
 ---
 
+## 一行命令卸载
+
+### Linux / macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/uninstall.sh | bash
+```
+
+### Windows
+
+```powershell
+iex (irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/uninstall.ps1)
+```
+
+卸载菜单提供以下模式：
+
+- **仅撤销配置**：清理 bootstrap 环境文件、wrapper、启动配置块和仍由脚本管理的 `settings.json` 字段，保留 Claude Code npm 包。
+- **恢复安装前状态**：在安装状态可确认且当前值未被修改时，恢复原 npm 版本、npm prefix 和默认 Node 设置。
+- **彻底卸载 Claude Code**：同时卸载 npm 包，默认保留 Node.js、nvm/fnm 和 Claude 用户数据。
+- **高级清理**：可继续清理确认由脚本安装的运行时，或删除全部 `~/.claude` 用户数据；危险操作需要额外输入确认文本。
+
+未知来源的文件、用户修改过的配置以及其他渠道安装的 `claude` 命令不会被自动删除。运行时清理还会比对安装完成时的目录内容哈希；发现新增 Node 版本、全局 npm 包、目录修改或无法确认的文件时会保留运行时和状态文件。Node 安装阶段中断时也会保留 pending 状态和既有配置，供重试或诊断。命令行执行可使用 `--preview`、`--config-only`、`--restore` 或 `--full`；`--runtime`、`--purge-data` 必须与 `--full` 一起使用并保留交互确认。PowerShell 文件参数对应为 `-Preview`、`-ConfigOnly`、`-Restore`、`-Full`、`-Runtime` 和 `-PurgeData`。
+
+---
+
 ## 这是什么？
 
 在一台**没有任何开发环境**的机器上，运行上面那一行命令即可自动完成：
@@ -148,13 +173,16 @@ npm install -g @anthropic-ai/claude-code@2.1.142
 
 ## 生成的文件
 
-| 路径                             | 说明                               |
-| -------------------------------- | ---------------------------------- |
-| `~/.claude-bootstrap/env`        | 环境变量文件（Linux/macOS）        |
-| `~/.claude-bootstrap/env.ps1`    | 环境变量文件（Windows PowerShell） |
-| `~/.claude-bootstrap/env.cmd`    | 环境变量文件（Windows cmd）        |
-| `~/.claude-bootstrap/bin/claude` | 包装脚本                           |
-| `~/.claude/settings.json`        | Claude Code 官方配置               |
+| 路径                                       | 说明                               |
+| ------------------------------------------ | ---------------------------------- |
+| `~/.claude-code/env`                       | 环境变量文件（Linux/macOS）        |
+| `~/.claude-code/bin/claude`                | 包装脚本（Linux/macOS）            |
+| `~/.claude-code/install-state.json`        | 无密钥安装状态（Linux/macOS）      |
+| `~/.claude-bootstrap/env.ps1`              | 环境变量文件（Windows PowerShell） |
+| `~/.claude-bootstrap/env.cmd`              | 环境变量文件（Windows cmd）        |
+| `~/.claude-bootstrap/bin/claude.cmd`       | 包装脚本（Windows）                |
+| `~/.claude-bootstrap/install-state.json`   | 无密钥安装状态（Windows）          |
+| `~/.claude/settings.json`                  | Claude Code 官方配置               |
 
 ---
 
@@ -242,7 +270,8 @@ powershell -ExecutionPolicy Bypass -File install.ps1   # Windows
 ## 安全说明
 
 - API Key / Auth Token 写入文件时仅所有者可读写
-- `~/.claude-bootstrap/` 目录设置为仅所有者可访问
+- Linux/macOS 的 `~/.claude-code/` 和 Windows 的 `~/.claude-bootstrap/` 用于保存 bootstrap 文件
+- `install-state.json` 只保存密钥哈希，不保存 API Key / Auth Token 明文
 - 脚本不通过命令行参数传递密钥，全部采用交互式输入（隐藏回显）或环境变量
 - 建议生产环境中通过环境变量预注密钥，避免交互式输入被日志记录
 

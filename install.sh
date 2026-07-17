@@ -42,6 +42,7 @@ ENV_FILE="$CONFIG_DIR/env"
 WRAPPER_DIR="$CONFIG_DIR/bin"
 CLAUDE_WRAPPER="$WRAPPER_DIR/claude"
 CLAUDE_SETTINGS_JSON="$HOME/.claude/settings.json"
+INSTALL_STATE_FILE="$CONFIG_DIR/install-state.json"
 PROFILE_MARKER_BEGIN="# >>> claude-code bootstrap >>>"
 PROFILE_MARKER_END="# <<< claude-code bootstrap <<<"
 
@@ -85,6 +86,324 @@ os_like=""
 arch=""
 sudo_cmd=""
 profile_file=""
+profile_existed_before="unknown"
+state_adopted="0"
+state_nvm_existed_before="unknown"
+state_node22_existed_before="unknown"
+state_default_node_before=""
+state_node_version_before=""
+state_npm_prefix_before=""
+state_package_before_known="1"
+state_package_before_version=""
+
+capture_preinstall_state() {
+  if [[ -f "$INSTALL_STATE_FILE" ]]; then
+    if grep -Eq '"pending"[[:space:]]*:[[:space:]]*true' "$INSTALL_STATE_FILE" 2>/dev/null; then
+      state_adopted="1"
+      state_package_before_known="0"
+    fi
+    return 0
+  fi
+
+  if [[ -f "$ENV_FILE" ]]; then
+    state_adopted="1"
+    state_package_before_known="0"
+  fi
+  if [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
+    state_nvm_existed_before="1"
+  else
+    state_nvm_existed_before="0"
+  fi
+  if compgen -G "${NVM_DIR:-$HOME/.nvm}/versions/node/v${REQUIRED_NODE_MAJOR}.*" >/dev/null 2>&1; then
+    state_node22_existed_before="1"
+  else
+    state_node22_existed_before="0"
+  fi
+  if [[ -r "${NVM_DIR:-$HOME/.nvm}/alias/default" ]]; then
+    state_default_node_before="$(cat "${NVM_DIR:-$HOME/.nvm}/alias/default" 2>/dev/null || true)"
+  fi
+  if ! need_cmd node && [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
+    load_nvm >/dev/null 2>&1 || true
+  fi
+  if need_cmd node; then
+    state_node_version_before="$(node -v 2>/dev/null || true)"
+  fi
+  if need_cmd npm && need_cmd node; then
+    state_npm_prefix_before="$(npm config get prefix 2>/dev/null || true)"
+    state_package_before_version="$(get_installed_claude_npm_version 2>/dev/null || true)"
+    state_package_before_known="1"
+  fi
+}
+
+initialize_install_state() {
+  mkdir -p "$CONFIG_DIR"
+  chmod 700 "$CONFIG_DIR"
+
+  if ! need_cmd node; then
+    if [[ -f "$INSTALL_STATE_FILE" ]]; then
+      if grep -Eq '"owner"[[:space:]]*:[[:space:]]*"claude-bootstrap"' "$INSTALL_STATE_FILE" 2>/dev/null &&
+         grep -Eq '"schemaVersion"[[:space:]]*:[[:space:]]*1' "$INSTALL_STATE_FILE" 2>/dev/null &&
+         grep -Eq '"pending"[[:space:]]*:[[:space:]]*true' "$INSTALL_STATE_FILE" 2>/dev/null; then
+        return 0
+      fi
+      load_nvm >/dev/null 2>&1 || true
+      need_cmd node || fatal "已有安装状态但当前无法加载 Node.js，无法验证状态归属；请先恢复 Node.js 后重试：$INSTALL_STATE_FILE"
+    fi
+  fi
+  if ! need_cmd node; then
+    local pending_tmp="${INSTALL_STATE_FILE}.tmp.$$"
+    local adopted_json="false" nvm_json="false" node22_json="false" package_known_json="false" package_present_json="false" default_known_json="true" default_b64=""
+    [[ "$state_adopted" == "1" ]] && adopted_json="true" && default_known_json="false"
+    [[ "$state_nvm_existed_before" == "1" ]] && nvm_json="true"
+    [[ "$state_node22_existed_before" == "1" ]] && node22_json="true"
+    [[ "$state_package_before_known" == "1" ]] && package_known_json="true"
+    [[ -n "$state_package_before_version" ]] && package_present_json="true"
+    if need_cmd base64; then
+      default_b64="$(printf '%s' "$state_default_node_before" | base64 | tr -d '\r\n')"
+    else
+      default_known_json="false"
+    fi
+    (umask 077; cat > "$pending_tmp" <<EOF
+{
+  "schemaVersion": 1,
+  "owner": "claude-bootstrap",
+  "platform": "$os_name",
+  "pending": true,
+  "adoptedExistingInstall": $adopted_json,
+  "npm": {
+    "packageBeforeKnown": $package_known_json,
+    "packageBeforePresent": $package_present_json,
+    "packageBeforeVersion": null,
+    "prefixBefore": null,
+    "installPrefix": null
+  },
+  "runtime": {
+    "manager": "nvm",
+    "managerExistedBefore": $nvm_json,
+    "managerInstalledByBootstrap": false,
+    "node22ExistedBefore": $node22_json,
+    "node22InstalledByBootstrap": false,
+    "nodeVersionBefore": null,
+    "defaultBeforeKnown": $default_known_json,
+    "defaultBeforeBase64": "$default_b64",
+    "defaultBefore": null,
+    "defaultChangedByBootstrap": false
+  }
+}
+EOF
+    )
+    mv -f "$pending_tmp" "$INSTALL_STATE_FILE"
+    chmod 600 "$INSTALL_STATE_FILE"
+    return 0
+  fi
+
+  CLAUDE_BOOTSTRAP_STATE_FILE="$INSTALL_STATE_FILE" \
+  CLAUDE_BOOTSTRAP_SETTINGS_FILE="$CLAUDE_SETTINGS_JSON" \
+  CLAUDE_BOOTSTRAP_PLATFORM="$os_name" \
+  CLAUDE_BOOTSTRAP_ADOPTED="$state_adopted" \
+  CLAUDE_BOOTSTRAP_NVM_BEFORE="$state_nvm_existed_before" \
+  CLAUDE_BOOTSTRAP_NODE22_BEFORE="$state_node22_existed_before" \
+  CLAUDE_BOOTSTRAP_DEFAULT_BEFORE="$state_default_node_before" \
+  CLAUDE_BOOTSTRAP_NODE_BEFORE="$state_node_version_before" \
+  CLAUDE_BOOTSTRAP_NPM_PREFIX_BEFORE="$state_npm_prefix_before" \
+  CLAUDE_BOOTSTRAP_PACKAGE_KNOWN="$state_package_before_known" \
+  CLAUDE_BOOTSTRAP_PACKAGE_VERSION="$state_package_before_version" \
+  node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const stateFile = process.env.CLAUDE_BOOTSTRAP_STATE_FILE;
+let pendingState = null;
+if (fs.existsSync(stateFile)) {
+  try {
+    const existing = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    if (existing.owner !== 'claude-bootstrap' || existing.schemaVersion !== 1) {
+      throw new Error('unsupported install state owner or schema');
+    }
+    if (!existing.pending) process.exit(0);
+    pendingState = existing;
+  } catch {
+    console.error(`[ERROR] 安装状态文件无效或版本不受支持：${stateFile}`);
+    process.exit(1);
+  }
+}
+
+const adopted = pendingState ? pendingState.adoptedExistingInstall === true : process.env.CLAUDE_BOOTSTRAP_ADOPTED === '1';
+const settingsFile = process.env.CLAUDE_BOOTSTRAP_SETTINGS_FILE;
+const nonSecretKeys = [
+  'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL', 'ANTHROPIC_CUSTOM_MODEL_OPTION',
+  'CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY',
+  'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB', 'DISABLE_UPDATES'
+];
+let settings = {};
+let settingsValid = true;
+if (fs.existsSync(settingsFile)) {
+  try {
+    const raw = fs.readFileSync(settingsFile, 'utf8').trim();
+    if (raw) settings = JSON.parse(raw);
+  } catch {
+    settingsValid = false;
+    settings = {};
+  }
+}
+const env = settings && typeof settings.env === 'object' && !Array.isArray(settings.env) ? settings.env : {};
+const managed = {};
+for (const key of nonSecretKeys) {
+  managed[key] = adopted || !settingsValid
+    ? { originalKnown: false }
+    : { originalKnown: true, originalPresent: Object.hasOwn(env, key), originalValue: env[key] };
+}
+for (const key of ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY']) {
+  managed[key] = adopted || !settingsValid
+    ? { originalKnown: false }
+    : { originalKnown: true, originalPresent: Object.hasOwn(env, key), secret: true };
+}
+const skip = adopted || !settingsValid
+  ? { originalKnown: false }
+  : { originalKnown: true, originalPresent: Object.hasOwn(settings, 'skipWebFetchPreflight'), originalValue: settings.skipWebFetchPreflight };
+const boolOrUnknown = value => value === '1' ? true : value === '0' ? false : null;
+const pendingRuntime = pendingState && pendingState.runtime || {};
+const pendingNpm = pendingState && pendingState.npm || {};
+const decodeBase64 = value => {
+  if (!value) return null;
+  try { return Buffer.from(value, 'base64').toString('utf8'); } catch { return null; }
+};
+const managerBefore = pendingState ? pendingRuntime.managerExistedBefore : boolOrUnknown(process.env.CLAUDE_BOOTSTRAP_NVM_BEFORE);
+const node22Before = pendingState ? pendingRuntime.node22ExistedBefore : boolOrUnknown(process.env.CLAUDE_BOOTSTRAP_NODE22_BEFORE);
+const defaultKnown = pendingState ? pendingRuntime.defaultBeforeKnown === true : !adopted;
+const defaultBefore = pendingState ? decodeBase64(pendingRuntime.defaultBeforeBase64) : (process.env.CLAUDE_BOOTSTRAP_DEFAULT_BEFORE || null);
+const packageKnown = pendingState ? pendingNpm.packageBeforeKnown === true : process.env.CLAUDE_BOOTSTRAP_PACKAGE_KNOWN === '1' && !adopted;
+const packageVersion = pendingState ? pendingNpm.packageBeforeVersion : (process.env.CLAUDE_BOOTSTRAP_PACKAGE_VERSION || null);
+const state = {
+  schemaVersion: 1,
+  owner: 'claude-bootstrap',
+  platform: process.env.CLAUDE_BOOTSTRAP_PLATFORM,
+  adoptedExistingInstall: adopted,
+  profile: { path: null, existedBefore: null },
+  settings: {
+    path: settingsFile,
+    existedBefore: fs.existsSync(settingsFile),
+    validBefore: settingsValid,
+    managed,
+    skipWebFetchPreflight: skip
+  },
+  npm: {
+    prefixBefore: process.env.CLAUDE_BOOTSTRAP_NPM_PREFIX_BEFORE || null,
+    prefixChanged: false,
+    installPrefix: null,
+    packageBeforeKnown: packageKnown,
+    packageBeforePresent: packageKnown ? Boolean(packageVersion) : null,
+    packageBeforeVersion: packageKnown ? packageVersion : null,
+    installedVersion: null
+  },
+  runtime: {
+    manager: 'nvm',
+    managerExistedBefore: adopted ? null : managerBefore,
+    managerInstalledByBootstrap: false,
+    installMethod: null,
+    node22ExistedBefore: adopted ? null : node22Before,
+    node22InstalledByBootstrap: false,
+    nodeVersionBefore: adopted ? null : (process.env.CLAUDE_BOOTSTRAP_NODE_BEFORE || null),
+    defaultBeforeKnown: defaultKnown,
+    defaultBefore: adopted ? null : defaultBefore,
+    defaultChangedByBootstrap: false
+  }
+};
+fs.mkdirSync(path.dirname(stateFile), { recursive: true, mode: 0o700 });
+const tmp = `${stateFile}.tmp.${process.pid}`;
+fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 });
+fs.renameSync(tmp, stateFile);
+fs.chmodSync(stateFile, 0o600);
+NODE
+}
+
+update_install_state() {
+  local action="$1"
+  shift
+  [[ -f "$INSTALL_STATE_FILE" ]] || return 0
+  CLAUDE_BOOTSTRAP_STATE_FILE="$INSTALL_STATE_FILE" \
+  CLAUDE_BOOTSTRAP_STATE_ACTION="$action" \
+  CLAUDE_BOOTSTRAP_STATE_ARG1="${1:-}" \
+  CLAUDE_BOOTSTRAP_STATE_ARG2="${2:-}" \
+  CLAUDE_BOOTSTRAP_STATE_ARG3="${3:-}" \
+  CLAUDE_BOOTSTRAP_STATE_ARG4="${4:-}" \
+  node <<'NODE'
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const file = process.env.CLAUDE_BOOTSTRAP_STATE_FILE;
+let state;
+try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { process.exit(0); }
+if (state.owner !== 'claude-bootstrap' || state.schemaVersion !== 1 || state.pending) process.exit(0);
+const action = process.env.CLAUDE_BOOTSTRAP_STATE_ACTION;
+const [a, b, c, d] = [1, 2, 3, 4].map(n => process.env[`CLAUDE_BOOTSTRAP_STATE_ARG${n}`] || '');
+if (action === 'runtime') {
+  const inventory = root => {
+    if (!root || !fs.existsSync(root)) return null;
+    const entries = [];
+    const visit = (absolute, relative) => {
+      for (const item of fs.readdirSync(absolute, { withFileTypes: true })) {
+        const rel = relative ? `${relative}/${item.name}` : item.name;
+        if (rel === '.git' || rel.startsWith('.git/')) continue;
+        const full = path.join(absolute, item.name);
+        if (/^versions\/node\/[^/]+\/lib\/node_modules\/@anthropic-ai$/.test(rel)) {
+          if (item.isDirectory()) visit(full, rel);
+          continue;
+        }
+        if (/^versions\/node\/[^/]+\/lib\/node_modules\/@anthropic-ai\/claude-code(?:\/|$)/.test(rel)) continue;
+        if (/^versions\/node\/[^/]+\/bin\/claude$/.test(rel)) continue;
+        if (item.isDirectory()) {
+          entries.push(`d:${rel}`);
+          visit(full, rel);
+        } else if (item.isSymbolicLink()) {
+          entries.push(`l:${rel}:${fs.readlinkSync(full)}`);
+        } else {
+          entries.push(`f:${rel}:${crypto.createHash('sha256').update(fs.readFileSync(full)).digest('hex')}`);
+        }
+      }
+    };
+    visit(root, '');
+    return crypto.createHash('sha256').update(entries.sort().join('\n')).digest('hex');
+  };
+  const defaultAfter = process.env.CLAUDE_BOOTSTRAP_DEFAULT_AFTER || null;
+  state.npm.installPrefix = a || null;
+  state.npm.installedVersion = b || null;
+  state.npm.prefixChanged = Boolean(state.npm.prefixBefore && a && state.npm.prefixBefore !== a);
+  state.runtime.managerInstalledByBootstrap = state.runtime.managerExistedBefore === false && c === '1';
+  state.runtime.installMethod = state.runtime.managerInstalledByBootstrap ? 'official-script' : null;
+  state.runtime.node22InstalledByBootstrap = state.runtime.node22ExistedBefore === false && d === '1';
+  state.runtime.defaultAfter = defaultAfter;
+  state.runtime.defaultChangedByBootstrap = Boolean(
+    state.runtime.defaultBeforeKnown && defaultAfter && state.runtime.defaultBefore !== defaultAfter
+  );
+  if (!state.runtime.inventoryAfter) state.runtime.inventoryAfter = inventory(process.env.CLAUDE_BOOTSTRAP_NVM_DIR);
+} else if (action === 'profile') {
+  if (!state.profile.path) state.profile.path = a || null;
+  if (state.profile.existedBefore === null) state.profile.existedBefore = b === '1';
+} else if (action === 'settings') {
+  const values = {
+    ANTHROPIC_BASE_URL: a,
+    ANTHROPIC_MODEL: d,
+    ANTHROPIC_CUSTOM_MODEL_OPTION: d,
+    CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: process.env.CLAUDE_BOOTSTRAP_DISCOVERY || '1',
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: process.env.CLAUDE_BOOTSTRAP_SCRUB || '0',
+    DISABLE_UPDATES: '1'
+  };
+  for (const [key, value] of Object.entries(values)) state.settings.managed[key].writtenValue = value;
+  const authKey = b === 'api_key' ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN';
+  const otherKey = authKey === 'ANTHROPIC_API_KEY' ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY';
+  state.settings.managed[authKey].writtenHash = crypto.createHash('sha256').update(c).digest('hex');
+  state.settings.managed[otherKey].deletedByBootstrap = true;
+  state.settings.skipWebFetchPreflight.writtenValue = true;
+} else if (action === 'model') {
+  state.settings.managed.ANTHROPIC_MODEL.writtenValue = a;
+  state.settings.managed.ANTHROPIC_CUSTOM_MODEL_OPTION.writtenValue = a;
+}
+const tmp = `${file}.tmp.${process.pid}`;
+fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 });
+fs.renameSync(tmp, file);
+fs.chmodSync(file, 0o600);
+NODE
+}
 
 check_platform() {
   case "$(uname -s)" in
@@ -226,7 +545,7 @@ install_nvm() {
   fi
   info "nvm 安装脚本下载完成：$tmp ($(wc -c < "$tmp" | tr -d ' ') bytes)"
   info "执行 nvm 安装脚本"
-  bash "$tmp" || {
+  PROFILE=/dev/null bash "$tmp" || {
     local install_rc=$?
     rm -f "$tmp"
     fatal "nvm 安装脚本执行失败，退出码：$install_rc"
@@ -416,6 +735,26 @@ install_claude_code() {
   success "Claude Code 安装成功：$installed_version (npm)"
 }
 
+record_runtime_npm_state() {
+  local prefix=""
+  local version=""
+  local nvm_now="0"
+  local node22_now="0"
+  local default_after=""
+  prefix="$(npm config get prefix 2>/dev/null || true)"
+  version="$(get_installed_claude_npm_version 2>/dev/null || true)"
+  [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]] && nvm_now="1"
+  if compgen -G "${NVM_DIR:-$HOME/.nvm}/versions/node/v${REQUIRED_NODE_MAJOR}.*" >/dev/null 2>&1; then
+    node22_now="1"
+  fi
+  if [[ -r "${NVM_DIR:-$HOME/.nvm}/alias/default" ]]; then
+    default_after="$(cat "${NVM_DIR:-$HOME/.nvm}/alias/default" 2>/dev/null || true)"
+  fi
+  CLAUDE_BOOTSTRAP_DEFAULT_AFTER="$default_after" \
+  CLAUDE_BOOTSTRAP_NVM_DIR="${NVM_DIR:-$HOME/.nvm}" \
+    update_install_state runtime "$prefix" "$version" "$nvm_now" "$node22_now"
+}
+
 select_profile_file() {
   local shell_name
   shell_name="$(basename "${SHELL:-bash}")"
@@ -446,6 +785,11 @@ select_profile_file() {
       fi
       ;;
   esac
+  if [[ -e "$profile_file" ]]; then
+    profile_existed_before="1"
+  else
+    profile_existed_before="0"
+  fi
   touch "$profile_file"
   info "将更新 shell 配置文件：$profile_file"
 }
@@ -453,7 +797,19 @@ select_profile_file() {
 remove_old_profile_block() {
   local file="$1"
   [[ -f "$file" ]] || return 0
-  local tmp
+  local tmp status
+  status="$(awk -v begin="$PROFILE_MARKER_BEGIN" -v end="$PROFILE_MARKER_END" '
+    BEGIN { valid=1 }
+    $0 == begin { begins++; if (open) valid=0; open=1; next }
+    $0 == end { ends++; if (!open) valid=0; open=0; next }
+    END {
+      if (begins == 0 && ends == 0) print "none";
+      else if (begins == 1 && ends == 1 && !open && valid) print "valid";
+      else print "invalid";
+    }
+  ' "$file")"
+  [[ "$status" == "none" ]] && return 0
+  [[ "$status" == "valid" ]] || fatal "shell profile 中的 claude-bootstrap 标记块不完整或重复，请手动修复后重试：$file"
   tmp="$(mktemp)"
   awk -v begin="$PROFILE_MARKER_BEGIN" -v end="$PROFILE_MARKER_END" '
     $0 == begin {skip=1; next}
@@ -466,6 +822,7 @@ remove_old_profile_block() {
 
 write_profile_block() {
   select_profile_file
+  update_install_state profile "$profile_file" "$profile_existed_before"
   remove_old_profile_block "$profile_file"
 
   local npm_bin=""
@@ -870,6 +1227,9 @@ fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
 fs.chmodSync(file, 0o600);
 NODE
+  CLAUDE_BOOTSTRAP_DISCOVERY="$ENABLE_GATEWAY_MODEL_DISCOVERY" \
+  CLAUDE_BOOTSTRAP_SCRUB="$CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT" \
+    update_install_state settings "$base_url" "$auth_mode" "$secret" "$model"
   success "已同步 Claude Code 官方配置：$CLAUDE_SETTINGS_JSON"
 }
 
@@ -939,6 +1299,7 @@ fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
 fs.chmodSync(file, 0o600);
 NODE
+  update_install_state model "$model"
   success "已同步 Claude Code 官方配置中的模型：$model"
 }
 
@@ -1198,8 +1559,12 @@ main() {
   check_memory
   setup_sudo
   install_basic_deps
+  capture_preinstall_state
+  initialize_install_state
   ensure_node22
+  initialize_install_state
   install_claude_code
+  record_runtime_npm_state
   configure_claude
   print_summary
 }

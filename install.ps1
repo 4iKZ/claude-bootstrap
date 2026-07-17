@@ -1,4 +1,4 @@
-# Claude Code Bootstrap for Windows v1.2
+﻿# Claude Code Bootstrap for Windows v1.2
 # Target: Windows 10+ / Windows Server 2019+
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File install.ps1
@@ -56,6 +56,7 @@ $ENV_FILE           = "$CONFIG_DIR\env.ps1"
 $WRAPPER_DIR        = "$CONFIG_DIR\bin"
 $CLAUDE_WRAPPER     = "$WRAPPER_DIR\claude.cmd"
 $CLAUDE_SETTINGS_JSON = "$env:USERPROFILE\.claude\settings.json"
+$INSTALL_STATE_FILE = "$CONFIG_DIR\install-state.json"
 $PROFILE_MARKER_BEGIN = "# >>> claude-bootstrap >>>"
 $PROFILE_MARKER_END   = "# <<< claude-bootstrap <<<"
 
@@ -76,6 +77,67 @@ function Write-SafeHost {
         [Console]::Out.WriteLine($Text)
     }
 }
+function Write-Utf8NoBomFile {
+    param([string]$Path, [AllowNull()][string]$Content)
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $(if ($null -eq $Content) { "" } else { $Content }), $encoding)
+}
+function Get-TextFileInfo {
+    param([string]$Path)
+    $bytes = if (Test-Path $Path) { [System.IO.File]::ReadAllBytes($Path) } else { [byte[]]@() }
+    $offset = 0
+    $withPreamble = $false
+    if ($bytes.Length -ge 4 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and $bytes[2] -eq 0 -and $bytes[3] -eq 0) {
+        $encoding = New-Object System.Text.UTF32Encoding($false, $true); $offset = 4; $withPreamble = $true
+    } elseif ($bytes.Length -ge 4 -and $bytes[0] -eq 0 -and $bytes[1] -eq 0 -and $bytes[2] -eq 0xFE -and $bytes[3] -eq 0xFF) {
+        $encoding = New-Object System.Text.UTF32Encoding($true, $true); $offset = 4; $withPreamble = $true
+    } elseif ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        $encoding = New-Object System.Text.UTF8Encoding($true); $offset = 3; $withPreamble = $true
+    } elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+        $encoding = New-Object System.Text.UnicodeEncoding($false, $true); $offset = 2; $withPreamble = $true
+    } elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {
+        $encoding = New-Object System.Text.UnicodeEncoding($true, $true); $offset = 2; $withPreamble = $true
+    } elseif ($bytes.Length -eq 0 -and $Path -match '[\\/]WindowsPowerShell[\\/]') {
+        $encoding = New-Object System.Text.UTF8Encoding($true); $withPreamble = $true
+    } elseif ($Path -match '[\\/]WindowsPowerShell[\\/]') {
+        try {
+            $encoding = New-Object System.Text.UTF8Encoding($false, $true)
+            [void]$encoding.GetString($bytes)
+        } catch {
+            try { $encoding = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage) }
+            catch { $encoding = [System.Text.Encoding]::Default }
+        }
+    } else {
+        $encoding = New-Object System.Text.UTF8Encoding($false)
+    }
+    $text = if ($bytes.Length -gt $offset) { $encoding.GetString($bytes, $offset, $bytes.Length - $offset) } else { "" }
+    $newline = if ($text.Contains("`r`n")) { "`r`n" } elseif ($text.Contains("`n")) { "`n" } elseif ($text.Contains("`r")) { "`r" } else { "`r`n" }
+    return [pscustomobject]@{ Text = $text; Encoding = $encoding; WithPreamble = $withPreamble; NewLine = $newline }
+}
+
+function Write-TextFilePreservingEncoding {
+    param([string]$Path, [AllowNull()][string]$Text, $Info)
+    $body = $Info.Encoding.GetBytes($(if ($null -eq $Text) { "" } else { $Text }))
+    $preamble = if ($Info.WithPreamble) { $Info.Encoding.GetPreamble() } else { [byte[]]@() }
+    $output = New-Object byte[] ($preamble.Length + $body.Length)
+    if ($preamble.Length) { [Array]::Copy($preamble, 0, $output, 0, $preamble.Length) }
+    if ($body.Length) { [Array]::Copy($body, 0, $output, $preamble.Length, $body.Length) }
+    [System.IO.File]::WriteAllBytes($Path, $output)
+}
+function Set-PrivateFileAcl {
+    param([string]$Path)
+    $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    $acl = New-Object System.Security.AccessControl.FileSecurity
+    $acl.SetOwner($sid)
+    $acl.SetAccessRuleProtection($true, $false)
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $sid,
+        [System.Security.AccessControl.FileSystemRights]::FullControl,
+        [System.Security.AccessControl.AccessControlType]::Allow
+    )
+    [void]$acl.AddAccessRule($rule)
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
 
 function Write-LogLine {
     param(
@@ -94,6 +156,234 @@ function Write-LogLine {
 function ConvertTo-PowerShellSingleQuotedString {
     param([AllowNull()][string]$Value)
     return "'" + (($Value -replace "'", "''")) + "'"
+}
+
+function Get-StringSha256 {
+    param([AllowNull()][string]$Value)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($(if ($null -eq $Value) { "" } else { $Value }))
+    $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+    return ([System.BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
+}
+
+function Get-NodeRuntimeInventoryHash {
+    param([AllowNull()][string]$Root)
+    if (-not $Root -or -not (Test-Path $Root) -or -not (need_cmd node)) { return $null }
+    $oldRoot = $env:CLAUDE_BOOTSTRAP_RUNTIME_ROOT
+    try {
+        $env:CLAUDE_BOOTSTRAP_RUNTIME_ROOT = $Root
+        $script = @'
+const crypto = require('crypto'), fs = require('fs'), path = require('path');
+const root = process.env.CLAUDE_BOOTSTRAP_RUNTIME_ROOT, entries = [];
+const visit = (absolute, relative) => {
+  for (const item of fs.readdirSync(absolute, { withFileTypes: true })) {
+    const rel = (relative ? `${relative}/${item.name}` : item.name).replace(/\\/g, '/');
+    const full = path.join(absolute, item.name);
+    if (rel === 'node_modules/@anthropic-ai') { if (item.isDirectory()) visit(full, rel); continue; }
+    if (/^node_modules\/@anthropic-ai\/claude-code(?:\/|$)/.test(rel)) continue;
+    if (/^claude(?:\.cmd|\.ps1)?$/i.test(rel)) continue;
+    if (item.isDirectory()) { entries.push(`d:${rel}`); visit(full, rel); }
+    else if (item.isSymbolicLink()) entries.push(`l:${rel}:${fs.readlinkSync(full)}`);
+    else entries.push(`f:${rel}:${crypto.createHash('sha256').update(fs.readFileSync(full)).digest('hex')}`);
+  }
+};
+visit(root, '');
+process.stdout.write(crypto.createHash('sha256').update(entries.sort().join('\n')).digest('hex'));
+'@
+        return ((& node -e $script 2>$null) -join "").Trim()
+    } finally {
+        if ($null -ne $oldRoot) { $env:CLAUDE_BOOTSTRAP_RUNTIME_ROOT = $oldRoot }
+        else { Remove-Item env:CLAUDE_BOOTSTRAP_RUNTIME_ROOT -ErrorAction SilentlyContinue }
+    }
+}
+
+function Get-InstallState {
+    if (-not (Test-Path $INSTALL_STATE_FILE)) { return $null }
+    try {
+        $state = Get-Content $INSTALL_STATE_FILE -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($state.owner -eq "claude-bootstrap" -and $state.schemaVersion -eq 1) { return $state }
+    } catch {
+        warn "安装状态文件无效，将按旧安装保守处理：$INSTALL_STATE_FILE"
+        return $null
+    }
+}
+
+function Save-InstallState {
+    param([Parameter(Mandatory = $true)]$State)
+    New-Item -ItemType Directory -Path $CONFIG_DIR -Force | Out-Null
+    $tmp = "$INSTALL_STATE_FILE.tmp.$PID"
+    Write-Utf8NoBomFile $tmp (($State | ConvertTo-Json -Depth 12) + "`n")
+    Move-Item -LiteralPath $tmp -Destination $INSTALL_STATE_FILE -Force
+    Set-PrivateFileAcl $INSTALL_STATE_FILE
+}
+
+function New-ManagedSettingState {
+    param($EnvObject, [string]$Name, [bool]$Known, [switch]$Secret)
+    $present = $false
+    $value = $null
+    if ($Known -and $EnvObject) {
+        $property = $EnvObject.PSObject.Properties[$Name]
+        if ($property) {
+            $present = $true
+            if (-not $Secret) { $value = $property.Value }
+        }
+    }
+    $entry = [ordered]@{ originalKnown = $Known; originalPresent = $(if ($Known) { $present } else { $null }) }
+    if ($Secret) { $entry.secret = $true }
+    elseif ($present) { $entry.originalValue = $value }
+    return $entry
+}
+
+function Initialize-InstallState {
+    if (Test-Path $INSTALL_STATE_FILE) {
+        if (-not (Get-InstallState)) { fatal "已有安装状态文件无效或版本不受支持，请先检查：$INSTALL_STATE_FILE" }
+        return
+    }
+
+    $adopted = Test-Path $ENV_FILE
+    $settingsExisted = Test-Path $CLAUDE_SETTINGS_JSON
+    $settingsValid = $true
+    $settings = $null
+    if ($settingsExisted) {
+        try { $settings = Get-Content $CLAUDE_SETTINGS_JSON -Raw | ConvertFrom-Json }
+        catch { $settingsValid = $false }
+    }
+    $known = (-not $adopted) -and $settingsValid
+    $settingsEnv = if ($settings -and $settings.env) { $settings.env } else { [pscustomobject]@{} }
+    $managed = [ordered]@{}
+    foreach ($name in @(
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_CUSTOM_MODEL_OPTION",
+        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY", "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "DISABLE_UPDATES"
+    )) {
+        $managed[$name] = New-ManagedSettingState $settingsEnv $name $known
+    }
+    foreach ($name in @("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY")) {
+        $managed[$name] = New-ManagedSettingState $settingsEnv $name $known -Secret
+    }
+
+    $skipEntry = [ordered]@{ originalKnown = $known; originalPresent = $null }
+    if ($known) {
+        $skipProperty = if ($settings) { $settings.PSObject.Properties["skipWebFetchPreflight"] } else { $null }
+        $skipEntry.originalPresent = $null -ne $skipProperty
+        if ($skipProperty) { $skipEntry.originalValue = $skipProperty.Value }
+    }
+
+    $fnmBefore = Load-Fnm
+    $node22Before = $false
+    if ($fnmBefore) {
+        $node22Before = ((& fnm list 2>$null) -join "`n") -match '(?m)\bv?22\.'
+    }
+    $nodeBefore = if (need_cmd node) { (& node -v 2>$null) -join "" } else { $null }
+    $defaultBefore = Get-FnmDefaultVersion
+    $prefixBefore = if (need_cmd npm) { Get-NpmGlobalBin } else { $null }
+    $packageVersion = if (need_cmd npm) { Get-InstalledClaudeNpmVersion } else { "" }
+
+    $state = [ordered]@{
+        schemaVersion = 1
+        owner = "claude-bootstrap"
+        platform = "windows"
+        adoptedExistingInstall = $adopted
+        profile = [ordered]@{ path = $null; existedBefore = $null }
+        settings = [ordered]@{
+            path = $CLAUDE_SETTINGS_JSON
+            existedBefore = $settingsExisted
+            validBefore = $settingsValid
+            managed = $managed
+            skipWebFetchPreflight = $skipEntry
+        }
+        npm = [ordered]@{
+            prefixBefore = $prefixBefore
+            prefixChanged = $false
+            installPrefix = $null
+            packageBeforeKnown = -not $adopted
+            packageBeforePresent = $(if ($adopted) { $null } else { -not [string]::IsNullOrEmpty($packageVersion) })
+            packageBeforeVersion = $(if ($adopted -or [string]::IsNullOrEmpty($packageVersion)) { $null } else { $packageVersion })
+            installedVersion = $null
+        }
+        runtime = [ordered]@{
+            manager = "fnm"
+            managerExistedBefore = $(if ($adopted) { $null } else { $fnmBefore })
+            managerInstalledByBootstrap = $false
+            installMethod = $null
+            node22ExistedBefore = $(if ($adopted) { $null } else { $node22Before })
+                node22InstalledByBootstrap = $false
+                nodeVersionBefore = $(if ($adopted) { $null } else { $nodeBefore })
+                defaultBeforeKnown = -not $adopted
+                defaultBefore = $(if ($adopted) { $null } else { $defaultBefore })
+            defaultChangedByBootstrap = $false
+        }
+    }
+    Save-InstallState $state
+}
+
+function Update-InstallRuntimeState {
+    $state = Get-InstallState
+    if (-not $state) { return }
+    $prefix = if (need_cmd npm) { Get-NpmGlobalBin } else { $null }
+    $version = if (need_cmd npm) { Get-InstalledClaudeNpmVersion } else { "" }
+    $fnmNow = Load-Fnm
+    $node22Now = $false
+    if ($fnmNow) { $node22Now = ((& fnm list 2>$null) -join "`n") -match '(?m)\bv?22\.' }
+    $defaultAfter = Get-FnmDefaultVersion
+    $nodeRoot = Get-FnmNodeRoot
+    $state.npm.installPrefix = $prefix
+    $state.npm.installedVersion = $(if ($version) { $version } else { $null })
+    $state.npm.prefixChanged = [bool]($state.npm.prefixBefore -and $prefix -and $state.npm.prefixBefore -ne $prefix)
+    if ($null -eq $state.runtime.PSObject.Properties["nodeRootAfter"] -or -not $state.runtime.nodeRootAfter) {
+        $state.runtime | Add-Member -NotePropertyName nodeRootAfter -NotePropertyValue $nodeRoot -Force
+    }
+    if ($null -eq $state.runtime.PSObject.Properties["inventoryAfter"] -or -not $state.runtime.inventoryAfter) {
+        $state.runtime | Add-Member -NotePropertyName inventoryAfter -NotePropertyValue (Get-NodeRuntimeInventoryHash $nodeRoot) -Force
+    }
+    $state.runtime.managerInstalledByBootstrap = [bool]($state.runtime.managerExistedBefore -eq $false -and $fnmNow)
+    if ($state.runtime.managerInstalledByBootstrap -and $global:FNM_INSTALL_METHOD -and -not $state.runtime.installMethod) {
+        $state.runtime.installMethod = $global:FNM_INSTALL_METHOD
+    }
+    $state.runtime.node22InstalledByBootstrap = [bool]($state.runtime.node22ExistedBefore -eq $false -and $node22Now)
+    $state.runtime | Add-Member -NotePropertyName defaultAfter -NotePropertyValue $defaultAfter -Force
+    $state.runtime.defaultChangedByBootstrap = [bool]($state.runtime.defaultBeforeKnown -and $defaultAfter -and $state.runtime.defaultBefore -ne $defaultAfter)
+    Save-InstallState $state
+}
+
+function Update-InstallProfileState {
+    param([string]$Path, [bool]$ExistedBefore)
+    $state = Get-InstallState
+    if (-not $state) { return }
+    if (-not $state.profile.path) { $state.profile.path = $Path }
+    if ($null -eq $state.profile.existedBefore) { $state.profile.existedBefore = $ExistedBefore }
+    Save-InstallState $state
+}
+
+function Update-InstallSettingsState {
+    param([string]$BaseUrl, [string]$AuthMode, [string]$Secret, [string]$Model)
+    $state = Get-InstallState
+    if (-not $state) { return }
+    $values = [ordered]@{
+        ANTHROPIC_BASE_URL = $BaseUrl
+        ANTHROPIC_MODEL = $Model
+        ANTHROPIC_CUSTOM_MODEL_OPTION = $Model
+        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = $ENABLE_GATEWAY_MODEL_DISCOVERY
+        CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = $CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT
+        DISABLE_UPDATES = "1"
+    }
+    foreach ($entry in $values.GetEnumerator()) {
+        $state.settings.managed.PSObject.Properties[$entry.Key].Value | Add-Member -NotePropertyName writtenValue -NotePropertyValue $entry.Value -Force
+    }
+    $authKey = if ($AuthMode -eq "api_key") { "ANTHROPIC_API_KEY" } else { "ANTHROPIC_AUTH_TOKEN" }
+    $otherKey = if ($authKey -eq "ANTHROPIC_API_KEY") { "ANTHROPIC_AUTH_TOKEN" } else { "ANTHROPIC_API_KEY" }
+    $state.settings.managed.PSObject.Properties[$authKey].Value | Add-Member -NotePropertyName writtenHash -NotePropertyValue (Get-StringSha256 $Secret) -Force
+    $state.settings.managed.PSObject.Properties[$otherKey].Value | Add-Member -NotePropertyName deletedByBootstrap -NotePropertyValue $true -Force
+    $state.settings.skipWebFetchPreflight | Add-Member -NotePropertyName writtenValue -NotePropertyValue $true -Force
+    Save-InstallState $state
+}
+
+function Update-InstallModelState {
+    param([string]$Model)
+    $state = Get-InstallState
+    if (-not $state) { return }
+    foreach ($name in @("ANTHROPIC_MODEL", "ANTHROPIC_CUSTOM_MODEL_OPTION")) {
+        $state.settings.managed.PSObject.Properties[$name].Value | Add-Member -NotePropertyName writtenValue -NotePropertyValue $Model -Force
+    }
+    Save-InstallState $state
 }
 
 function info    { param([Parameter(ValueFromRemainingArguments = $true)][object[]]$Message) Write-LogLine "[INFO]  " Blue @Message }
@@ -144,6 +434,7 @@ function Read-Secret {
 }
 
 $global:arch = ""
+$global:FNM_INSTALL_METHOD = $null
 
 # ----- platform -----------------------------------------------------------
 function Test-Platform {
@@ -256,6 +547,21 @@ function Load-Fnm {
     return $false
 }
 
+function Get-FnmDefaultVersion {
+    if (-not (Load-Fnm)) { return $null }
+    $value = ((& fnm default 2>$null) -join "").Trim()
+    if ($LASTEXITCODE -eq 0 -and $value -match 'v?(\d+(?:\.\d+){0,2})') { return $Matches[1] }
+    return $null
+}
+
+function Get-FnmNodeRoot {
+    if (-not (Load-Fnm)) { return $null }
+    $candidate = ((& fnm exec "--using=$REQUIRED_NODE_MAJOR" node "-p" "process.execPath" 2>$null) -join "").Trim().Trim('"')
+    if ($LASTEXITCODE -ne 0 -or -not $candidate -or -not (Test-Path $candidate)) { return $null }
+    if (Test-Path $candidate -PathType Leaf) { return Split-Path $candidate -Parent }
+    return $candidate
+}
+
 function Install-Fnm {
     if (Load-Fnm) {
         return
@@ -263,10 +569,12 @@ function Install-Fnm {
 
     info "安装 fnm (Fast Node Manager)"
     if (need_cmd winget) {
+        $global:FNM_INSTALL_METHOD = "winget"
         winget install --id Schniz.fnm --source winget --accept-source-agreements --accept-package-agreements
         # Refresh PATH
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     } else {
+        $global:FNM_INSTALL_METHOD = "official-script"
         # Fallback: direct download via PowerShell
         info "通过 fnm 官方脚本安装"
         $installScript = "$env:TEMP\fnm-install.ps1"
@@ -478,7 +786,14 @@ function Remove-OldProfileBlock {
     param([string]$File)
     if (-not (Test-Path $File)) { return }
 
-    $lines = Get-Content $File
+    $fileInfo = Get-TextFileInfo $File
+    $lines = @([regex]::Split($fileInfo.Text, "`r`n|`n|`r"))
+    $beginIndexes = @(for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -eq $PROFILE_MARKER_BEGIN) { $i } })
+    $endIndexes = @(for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -eq $PROFILE_MARKER_END) { $i } })
+    if ($beginIndexes.Count -eq 0 -and $endIndexes.Count -eq 0) { return }
+    if ($beginIndexes.Count -ne 1 -or $endIndexes.Count -ne 1 -or $beginIndexes[0] -ge $endIndexes[0]) {
+        fatal "PowerShell profile 中的 claude-bootstrap 标记块不完整或重复，请手动修复后重试：$File"
+    }
     $result = @()
     $skip = $false
     foreach ($line in $lines) {
@@ -486,12 +801,13 @@ function Remove-OldProfileBlock {
         if ($line -eq $PROFILE_MARKER_END)   { $skip = $false; continue }
         if (-not $skip) { $result += $line }
     }
-    # Remove trailing blank results if file ended inside the block
-    $result -join "`r`n" | Set-Content $File -Encoding UTF8
+    Write-TextFilePreservingEncoding $File ($result -join $fileInfo.NewLine) $fileInfo
 }
 
 function Write-ProfileBlock {
+    $profileExistedBefore = Test-Path $PROFILE
     $profile = Select-ProfileFile
+    Update-InstallProfileState $profile $profileExistedBefore
     Remove-OldProfileBlock $profile
 
     $npmPrefix = Get-NpmGlobalBin
@@ -516,7 +832,9 @@ if (Test-Path `"`$env:APPDATA\fnm\fnm.exe`")       { & `"`$env:APPDATA\fnm\fnm.e
 if (Test-Path `"`$env:USERPROFILE\.claude-bootstrap\env.ps1`") { . `"`$env:USERPROFILE\.claude-bootstrap\env.ps1`" }
 $PROFILE_MARKER_END
 "@
-    Add-Content -Path $profile -Value $block -Encoding UTF8
+    $fileInfo = Get-TextFileInfo $profile
+    $normalizedBlock = [regex]::Replace($block, "`r`n|`n|`r", $fileInfo.NewLine)
+    Write-TextFilePreservingEncoding $profile ($fileInfo.Text + $normalizedBlock) $fileInfo
     success "已写入启动配置：$profile"
 }
 
@@ -845,6 +1163,7 @@ fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
         Remove-Item env:CLAUDE_BOOTSTRAP_GATEWAY_MODEL_DISCOVERY -ErrorAction SilentlyContinue
         Remove-Item env:CLAUDE_BOOTSTRAP_ENV_SCRUB -ErrorAction SilentlyContinue
     }
+    Update-InstallSettingsState $BaseUrl $AuthMode $Secret $Model
     success "已同步 Claude Code 官方配置：$CLAUDE_SETTINGS_JSON"
 }
 
@@ -918,6 +1237,7 @@ fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
         Remove-Item env:CLAUDE_BOOTSTRAP_SETTINGS_FILE -ErrorAction SilentlyContinue
         Remove-Item env:CLAUDE_BOOTSTRAP_MODEL -ErrorAction SilentlyContinue
     }
+    Update-InstallModelState $Model
     success "已同步 Claude Code 官方配置中的模型：$Model"
 }
 
@@ -1200,8 +1520,10 @@ function Main {
     Test-Memory
     Test-Admin
     Install-BasicDeps
+    Initialize-InstallState
     Enable-Node22
     Install-ClaudeCode
+    Update-InstallRuntimeState
     Set-ClaudeConfig
     Write-Summary
 }
