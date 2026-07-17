@@ -873,6 +873,75 @@ NODE
   success "已同步 Claude Code 官方配置：$CLAUDE_SETTINGS_JSON"
 }
 
+update_model_in_env_file() {
+  local model="$1"
+  local model_line=""
+  local custom_line=""
+  local tmp=""
+  model_line="export ANTHROPIC_MODEL=$(shell_quote "$model")"
+  custom_line="export ANTHROPIC_CUSTOM_MODEL_OPTION=$(shell_quote "$model")"
+  tmp="$(mktemp)"
+
+  awk -v model_line="$model_line" -v custom_line="$custom_line" '
+    BEGIN { model_seen=0; custom_seen=0 }
+    /^[[:space:]]*export[[:space:]]+ANTHROPIC_MODEL=/ {
+      if (!model_seen) print model_line
+      model_seen=1
+      next
+    }
+    /^[[:space:]]*export[[:space:]]+ANTHROPIC_CUSTOM_MODEL_OPTION=/ {
+      if (!custom_seen) print custom_line
+      custom_seen=1
+      next
+    }
+    { print }
+    END {
+      if (!model_seen) print model_line
+      if (!custom_seen) print custom_line
+    }
+  ' "$ENV_FILE" > "$tmp"
+
+  cat "$tmp" > "$ENV_FILE"
+  rm -f "$tmp"
+  chmod 600 "$ENV_FILE"
+  success "已更新环境变量中的模型：$model"
+}
+
+update_model_in_claude_settings_json() {
+  local model="$1"
+  mkdir -p "$HOME/.claude"
+  chmod 700 "$HOME/.claude"
+
+  CLAUDE_TEAM_SETTINGS_FILE="$CLAUDE_SETTINGS_JSON" \
+  CLAUDE_TEAM_MODEL="$model" \
+  node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const file = process.env.CLAUDE_TEAM_SETTINGS_FILE;
+let data = {};
+try {
+  if (fs.existsSync(file)) {
+    const raw = fs.readFileSync(file, 'utf8').trim();
+    if (raw) data = JSON.parse(raw);
+  }
+} catch (err) {
+  const backup = file + '.bak.' + Date.now();
+  fs.copyFileSync(file, backup);
+  data = {};
+  console.error(`[WARN] Existing settings.json is not valid JSON. Backed up to ${backup}`);
+}
+if (!data || typeof data !== 'object' || Array.isArray(data)) data = {};
+const env = data.env && typeof data.env === 'object' && !Array.isArray(data.env) ? data.env : {};
+env.ANTHROPIC_MODEL = process.env.CLAUDE_TEAM_MODEL;
+env.ANTHROPIC_CUSTOM_MODEL_OPTION = process.env.CLAUDE_TEAM_MODEL;
+data.env = env;
+fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
+fs.chmodSync(file, 0o600);
+NODE
+  success "已同步 Claude Code 官方配置中的模型：$model"
+}
+
 sync_settings_from_existing_env() {
   if [[ ! -f "$ENV_FILE" ]]; then
     return 0
@@ -899,6 +968,67 @@ sync_settings_from_existing_env() {
   else
     warn "已有 env 文件信息不完整，无法同步到 $CLAUDE_SETTINGS_JSON。"
   fi
+}
+
+choose_existing_config_action() {
+  local choice=""
+  printf '\n请选择操作：\n' >&2
+  printf '  1) 保留现有配置  [默认]\n' >&2
+  printf '  2) 仅切换模型\n' >&2
+  printf '  3) 重新配置全部\n' >&2
+  printf '请输入编号 [1]：' >&2
+  read_user_input -r choice || true
+  case "${choice:-1}" in
+    2) printf 'switch_model' ;;
+    3) printf 'reconfigure' ;;
+    *) printf 'keep' ;;
+  esac
+}
+
+switch_model_from_existing_config() {
+  set +u
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set -u
+
+  local base_url="${ANTHROPIC_BASE_URL:-}"
+  local current_model="${ANTHROPIC_MODEL:-${ANTHROPIC_CUSTOM_MODEL_OPTION:-}}"
+  local auth_mode=""
+  local secret=""
+  local new_model=""
+  local candidate=""
+  local reordered=()
+
+  if [[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+    auth_mode="auth_token"
+    secret="$ANTHROPIC_AUTH_TOKEN"
+  elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+    auth_mode="api_key"
+    secret="$ANTHROPIC_API_KEY"
+  fi
+
+  if [[ -z "$base_url" || -z "$current_model" || -z "$auth_mode" || -z "$secret" ]]; then
+    warn "已有配置缺少 BASE_URL、认证信息或当前模型，无法仅切换模型。请重新运行并选择“重新配置全部”。"
+    return 1
+  fi
+
+  success "当前模型：$current_model"
+  prepare_model_menu "$base_url" "$auth_mode" "$secret"
+  reordered=("$current_model")
+  for candidate in "${MODEL_MENU[@]}"; do
+    [[ "$candidate" == "$current_model" ]] || reordered+=("$candidate")
+  done
+  MODEL_MENU=("${reordered[@]}")
+  new_model="$(choose_model)"
+
+  update_model_in_env_file "$new_model"
+  update_model_in_claude_settings_json "$new_model"
+  if [[ "$new_model" == "$current_model" ]]; then
+    success "模型保持不变：$current_model"
+  else
+    success "模型已从 $current_model 切换为 $new_model"
+  fi
+  info "请重新启动 Claude Code；当前终端可执行：source $ENV_FILE"
 }
 
 create_claude_wrapper() {
@@ -996,13 +1126,24 @@ validate_gateway() {
 configure_claude() {
   if [[ -f "$ENV_FILE" ]]; then
     warn "检测到已有配置：$ENV_FILE"
-    if ! confirm "是否覆盖已有 Claude Code 配置？" "N"; then
-      success "保留已有配置。"
-      sync_settings_from_existing_env
-      write_profile_block
-      create_claude_wrapper
-      return
-    fi
+    local existing_action=""
+    existing_action="$(choose_existing_config_action)"
+    case "$existing_action" in
+      keep)
+        success "保留已有配置。"
+        sync_settings_from_existing_env
+        write_profile_block
+        create_claude_wrapper
+        return
+        ;;
+      switch_model)
+        switch_model_from_existing_config || true
+        return
+        ;;
+      reconfigure)
+        info "将重新配置全部 Claude Code 设置。"
+        ;;
+    esac
   fi
 
   local base_url auth_mode secret model

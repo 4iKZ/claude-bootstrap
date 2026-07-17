@@ -848,6 +848,79 @@ fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
     success "已同步 Claude Code 官方配置：$CLAUDE_SETTINGS_JSON"
 }
 
+function Update-ModelInEnvFile {
+    param([string]$Model)
+
+    $modelLine = "`$env:ANTHROPIC_MODEL = $(ConvertTo-PowerShellSingleQuotedString $Model)"
+    $customLine = "`$env:ANTHROPIC_CUSTOM_MODEL_OPTION = $(ConvertTo-PowerShellSingleQuotedString $Model)"
+    $modelSeen = $false
+    $customSeen = $false
+    $outputLines = @()
+
+    foreach ($line in @(Get-Content $ENV_FILE -ErrorAction Stop)) {
+        if ($line -match '^\s*\$env:ANTHROPIC_MODEL\s*=') {
+            if (-not $modelSeen) { $outputLines += $modelLine }
+            $modelSeen = $true
+            continue
+        }
+        if ($line -match '^\s*\$env:ANTHROPIC_CUSTOM_MODEL_OPTION\s*=') {
+            if (-not $customSeen) { $outputLines += $customLine }
+            $customSeen = $true
+            continue
+        }
+        $outputLines += $line
+    }
+
+    if (-not $modelSeen) { $outputLines += $modelLine }
+    if (-not $customSeen) { $outputLines += $customLine }
+    $outputLines -join "`r`n" | Set-Content $ENV_FILE -Encoding UTF8
+    success "已更新环境变量中的模型：$Model"
+}
+
+function Update-ModelInClaudeSettingsJson {
+    param([string]$Model)
+
+    $settingsDir = Split-Path $CLAUDE_SETTINGS_JSON -Parent
+    New-Item -ItemType Directory -Path $settingsDir -Force | Out-Null
+
+    try {
+        $env:CLAUDE_BOOTSTRAP_SETTINGS_FILE = $CLAUDE_SETTINGS_JSON
+        $env:CLAUDE_BOOTSTRAP_MODEL = $Model
+        $nodeScript = @'
+const fs = require('fs');
+const path = require('path');
+const file = process.env.CLAUDE_BOOTSTRAP_SETTINGS_FILE;
+let data = {};
+try {
+  if (fs.existsSync(file)) {
+    const raw = fs.readFileSync(file, 'utf8').trim();
+    if (raw) data = JSON.parse(raw);
+  }
+} catch (err) {
+  const backup = file + '.bak.' + Date.now();
+  fs.copyFileSync(file, backup);
+  data = {};
+  console.error(`[WARN] Existing settings.json is not valid JSON. Backed up to ${backup}`);
+}
+if (!data || typeof data !== 'object' || Array.isArray(data)) data = {};
+const env = data.env && typeof data.env === 'object' && !Array.isArray(data.env) ? data.env : {};
+env.ANTHROPIC_MODEL = process.env.CLAUDE_BOOTSTRAP_MODEL;
+env.ANTHROPIC_CUSTOM_MODEL_OPTION = process.env.CLAUDE_BOOTSTRAP_MODEL;
+data.env = env;
+fs.mkdirSync(path.dirname(file), { recursive: true });
+fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+'@
+        $nodeScript | node
+        if ($LASTEXITCODE -ne 0) {
+            fatal "更新 Claude Code settings.json 中的模型失败。"
+        }
+    } finally {
+        Remove-Item env:CLAUDE_BOOTSTRAP_SETTINGS_FILE -ErrorAction SilentlyContinue
+        Remove-Item env:CLAUDE_BOOTSTRAP_MODEL -ErrorAction SilentlyContinue
+    }
+    success "已同步 Claude Code 官方配置中的模型：$Model"
+}
+
 function Sync-SettingsFromExistingEnv {
     if (-not (Test-Path $ENV_FILE)) { return }
 
@@ -872,6 +945,59 @@ function Sync-SettingsFromExistingEnv {
     } else {
         warn "已有 env 文件信息不完整，无法同步到 ${CLAUDE_SETTINGS_JSON}。"
     }
+}
+
+function Choose-ExistingConfigAction {
+    Write-SafeHost ""
+    Write-SafeHost "请选择操作："
+    Write-SafeHost "  1) 保留现有配置  [默认]"
+    Write-SafeHost "  2) 仅切换模型"
+    Write-SafeHost "  3) 重新配置全部"
+    $choice = Read-Host -Prompt "请输入编号 [1]"
+    switch ($choice) {
+        "2" { return "switch_model" }
+        "3" { return "reconfigure" }
+        default { return "keep" }
+    }
+}
+
+function Switch-ModelFromExistingConfig {
+    . $ENV_FILE
+
+    $baseUrl = $env:ANTHROPIC_BASE_URL
+    $currentModel = if ($env:ANTHROPIC_MODEL) { $env:ANTHROPIC_MODEL } else { $env:ANTHROPIC_CUSTOM_MODEL_OPTION }
+    $authMode = ""
+    $secret = ""
+
+    if ($env:ANTHROPIC_AUTH_TOKEN) {
+        $authMode = "auth_token"
+        $secret = $env:ANTHROPIC_AUTH_TOKEN
+    } elseif ($env:ANTHROPIC_API_KEY) {
+        $authMode = "api_key"
+        $secret = $env:ANTHROPIC_API_KEY
+    }
+
+    if (-not $baseUrl -or -not $currentModel -or -not $authMode -or -not $secret) {
+        warn "已有配置缺少 BASE_URL、认证信息或当前模型，无法仅切换模型。请重新运行并选择“重新配置全部”。"
+        return $false
+    }
+
+    success "当前模型：$currentModel"
+    Prepare-ModelMenu $baseUrl $authMode $secret
+    $SCRIPT:MODEL_MENU = @($currentModel) + @($SCRIPT:MODEL_MENU | Where-Object { $_ -ne $currentModel })
+    $newModel = Choose-Model
+
+    Update-ModelInEnvFile $newModel
+    Update-ModelInClaudeSettingsJson $newModel
+    $env:ANTHROPIC_MODEL = $newModel
+    $env:ANTHROPIC_CUSTOM_MODEL_OPTION = $newModel
+    if ($newModel -eq $currentModel) {
+        success "模型保持不变：$currentModel"
+    } else {
+        success "模型已从 $currentModel 切换为 $newModel"
+    }
+    info "请重新启动 Claude Code 使新模型生效。"
+    return $true
 }
 
 function New-ClaudeWrapper {
@@ -1000,12 +1126,22 @@ function Test-Gateway {
 function Set-ClaudeConfig {
     if (Test-Path $ENV_FILE) {
         warn "检测到已有配置：$ENV_FILE"
-        if (-not (confirm "是否覆盖已有 Claude Code 配置？" "N")) {
-            success "保留已有配置。"
-            Sync-SettingsFromExistingEnv
-            Write-ProfileBlock
-            New-ClaudeWrapper
-            return
+        $existingAction = Choose-ExistingConfigAction
+        switch ($existingAction) {
+            "keep" {
+                success "保留已有配置。"
+                Sync-SettingsFromExistingEnv
+                Write-ProfileBlock
+                New-ClaudeWrapper
+                return
+            }
+            "switch_model" {
+                Switch-ModelFromExistingConfig | Out-Null
+                return
+            }
+            "reconfigure" {
+                info "将重新配置全部 Claude Code 设置。"
+            }
         }
     }
 
