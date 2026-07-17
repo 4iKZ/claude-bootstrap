@@ -31,12 +31,12 @@ curl -fsSL https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.
 ### Windows
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.ps1)
+iex ((irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.ps1).TrimStart([char]0xFEFF))
 ```
 
 > **Linux / macOS**：管道方式无法修改父 shell 环境，完成后 `source ~/.bashrc` 或重新打开终端。
 >
-> **Windows**：若提示 "无法加载"，先运行 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`，或使用 `powershell -ExecutionPolicy Bypass` 启动。
+> **Windows**：命令会移除 Windows PowerShell 5.1 从网络脚本保留的 UTF-8 BOM；若提示 "无法加载"，先运行 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`，或使用 `powershell -ExecutionPolicy Bypass` 启动。
 
 ---
 
@@ -51,7 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/uninstal
 ### Windows
 
 ```powershell
-iex (irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/uninstall.ps1)
+iex ((irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/uninstall.ps1).TrimStart([char]0xFEFF))
 ```
 
 卸载菜单提供以下模式：
@@ -94,7 +94,7 @@ BOOTSTRAP_BASE_URL="https://api.example.com" bash -c "$(curl -fsSL https://raw.g
 ### Windows
 
 ```powershell
-$env:BOOTSTRAP_BASE_URL="https://api.example.com"; iex (irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.ps1)
+$env:BOOTSTRAP_BASE_URL="https://api.example.com"; iex ((irm https://raw.githubusercontent.com/4iKZ/claude-bootstrap/main/install.ps1).TrimStart([char]0xFEFF))
 ```
 
 ---
