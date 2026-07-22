@@ -32,6 +32,7 @@ $CREATE_CLAUDE_WRAPPER      = if (Test-Path env:CREATE_CLAUDE_WRAPPER) { $env:CR
 $ENABLE_GATEWAY_MODEL_DISCOVERY = if (Test-Path env:ENABLE_GATEWAY_MODEL_DISCOVERY) { $env:ENABLE_GATEWAY_MODEL_DISCOVERY } else { "1" }
 $CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT = if (Test-Path env:CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT) { $env:CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT } else { "0" }
 $REQUIRED_NODE_MAJOR        = if (Test-Path env:REQUIRED_NODE_MAJOR) { $env:REQUIRED_NODE_MAJOR } else { "22" }
+$NODE_DIST_MIRROR_FALLBACK  = if ((Test-Path env:NODE_DIST_MIRROR_FALLBACK) -and -not [string]::IsNullOrWhiteSpace($env:NODE_DIST_MIRROR_FALLBACK)) { $env:NODE_DIST_MIRROR_FALLBACK } else { "https://npmmirror.com/mirrors/node" }
 $CLAUDE_CODE_TARGET_VERSION = "2.1.142"
 $CLAUDE_NPM_PACKAGE_NAME    = "@anthropic-ai/claude-code"
 $CLAUDE_NPM_PACKAGE         = "@anthropic-ai/claude-code@$CLAUDE_CODE_TARGET_VERSION"
@@ -596,6 +597,65 @@ function Get-NodeMajor {
     return $ver
 }
 
+function Test-NodeDistMirror {
+    param([string]$Mirror)
+    $indexUrl = "$($Mirror.TrimEnd('/'))/index.tab"
+    try {
+        Invoke-WebRequest -Uri $indexUrl -Headers @{ Range = "bytes=0-0" } -TimeoutSec 15 -UseBasicParsing -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Select-FnmNodeDistMirror {
+    $officialMirror = "https://nodejs.org/dist"
+    $fallbackMirror = $NODE_DIST_MIRROR_FALLBACK.TrimEnd('/')
+
+    if ((Test-Path env:FNM_NODE_DIST_MIRROR) -and -not [string]::IsNullOrWhiteSpace($env:FNM_NODE_DIST_MIRROR)) {
+        $env:FNM_NODE_DIST_MIRROR = $env:FNM_NODE_DIST_MIRROR.TrimEnd('/')
+        info "使用用户指定的 Node.js 下载源：$env:FNM_NODE_DIST_MIRROR"
+        return
+    }
+
+    info "检测 Node.js 官方下载源：$officialMirror"
+    if (Test-NodeDistMirror $officialMirror) {
+        $env:FNM_NODE_DIST_MIRROR = $officialMirror
+        info "Node.js 官方下载源可用。"
+        return
+    }
+
+    warn "Node.js 官方下载源不可用，尝试国内镜像：$fallbackMirror"
+    if (Test-NodeDistMirror $fallbackMirror) {
+        $env:FNM_NODE_DIST_MIRROR = $fallbackMirror
+        success "已切换 Node.js 下载源：$env:FNM_NODE_DIST_MIRROR"
+        return
+    }
+
+    $env:FNM_NODE_DIST_MIRROR = $officialMirror
+    warn "官方源和国内镜像均未通过连通性检测，将继续尝试官方源并保留 fnm 的详细错误输出。"
+}
+
+function Install-NodeWithMirrorFallback {
+    $userMirror = if ((Test-Path env:FNM_NODE_DIST_MIRROR) -and -not [string]::IsNullOrWhiteSpace($env:FNM_NODE_DIST_MIRROR)) { $env:FNM_NODE_DIST_MIRROR } else { "" }
+    $fallbackMirror = $NODE_DIST_MIRROR_FALLBACK.TrimEnd('/')
+
+    Select-FnmNodeDistMirror
+    & fnm install $REQUIRED_NODE_MAJOR
+    if ($LASTEXITCODE -eq 0) { return }
+
+    if (-not $userMirror -and $env:FNM_NODE_DIST_MIRROR.TrimEnd('/') -ne $fallbackMirror) {
+        warn "当前 Node.js 下载源安装失败，尝试国内镜像：$fallbackMirror"
+        if (Test-NodeDistMirror $fallbackMirror) {
+            $env:FNM_NODE_DIST_MIRROR = $fallbackMirror
+            & fnm install $REQUIRED_NODE_MAJOR
+            if ($LASTEXITCODE -eq 0) { return }
+        }
+    }
+
+    fatal "fnm install $REQUIRED_NODE_MAJOR 失败。请查看上方 fnm 输出。"
+}
+
 function Enable-Node22 {
     $currentMajor = ""
     if (need_cmd node) {
@@ -622,7 +682,7 @@ function Enable-Node22 {
 
     Install-Fnm
     info "通过 fnm 安装 Node.js $REQUIRED_NODE_MAJOR"
-    fnm install $REQUIRED_NODE_MAJOR
+    Install-NodeWithMirrorFallback
     fnm default $REQUIRED_NODE_MAJOR
     fnm use $REQUIRED_NODE_MAJOR
     success "Node.js 已就绪：$(node -v)，npm：$(npm -v)"

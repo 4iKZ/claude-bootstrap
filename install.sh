@@ -18,6 +18,7 @@ ENABLE_GATEWAY_MODEL_DISCOVERY="${ENABLE_GATEWAY_MODEL_DISCOVERY:-1}"
 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT="${CLAUDE_CODE_SUBPROCESS_ENV_SCRUB_DEFAULT:-0}"
 NVM_VERSION="${NVM_VERSION:-v0.40.3}"
 REQUIRED_NODE_MAJOR="${REQUIRED_NODE_MAJOR:-22}"
+NODE_DIST_MIRROR_FALLBACK="${NODE_DIST_MIRROR_FALLBACK:-https://npmmirror.com/mirrors/node}"
 CLAUDE_CODE_TARGET_VERSION="2.1.142"
 CLAUDE_NPM_PACKAGE_NAME="@anthropic-ai/claude-code"
 CLAUDE_NPM_PACKAGE="@anthropic-ai/claude-code@$CLAUDE_CODE_TARGET_VERSION"
@@ -544,8 +545,8 @@ install_nvm() {
     fatal "下载 nvm 安装脚本失败。请检查 raw.githubusercontent.com 网络连通性，或稍后重试。"
   fi
   info "nvm 安装脚本下载完成：$tmp ($(wc -c < "$tmp" | tr -d ' ') bytes)"
-  info "执行 nvm 安装脚本"
-  PROFILE=/dev/null bash "$tmp" || {
+  info "执行 nvm 安装脚本（METHOD=script，不使用 Git Clone）"
+  PROFILE=/dev/null METHOD=script bash "$tmp" || {
     local install_rc=$?
     rm -f "$tmp"
     fatal "nvm 安装脚本执行失败，退出码：$install_rc"
@@ -557,6 +558,58 @@ install_nvm() {
 
 node_major() {
   node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/'
+}
+
+node_dist_mirror_reachable() {
+  local mirror="${1%/}"
+  curl -fsSL --connect-timeout 5 --max-time 15 -o /dev/null "$mirror/index.tab"
+}
+
+select_nvm_node_dist_mirror() {
+  local official_mirror="https://nodejs.org/dist"
+  local fallback_mirror="${NODE_DIST_MIRROR_FALLBACK%/}"
+
+  if [[ -n "${NVM_NODEJS_ORG_MIRROR:-}" ]]; then
+    export NVM_NODEJS_ORG_MIRROR="${NVM_NODEJS_ORG_MIRROR%/}"
+    info "使用用户指定的 Node.js 下载源：$NVM_NODEJS_ORG_MIRROR"
+    return
+  fi
+
+  info "检测 Node.js 官方下载源：$official_mirror"
+  if node_dist_mirror_reachable "$official_mirror"; then
+    export NVM_NODEJS_ORG_MIRROR="$official_mirror"
+    info "Node.js 官方下载源可用。"
+    return
+  fi
+
+  warn "Node.js 官方下载源不可用，尝试国内镜像：$fallback_mirror"
+  if node_dist_mirror_reachable "$fallback_mirror"; then
+    export NVM_NODEJS_ORG_MIRROR="$fallback_mirror"
+    success "已切换 Node.js 下载源：$NVM_NODEJS_ORG_MIRROR"
+    return
+  fi
+
+  export NVM_NODEJS_ORG_MIRROR="$official_mirror"
+  warn "官方源和国内镜像均未通过连通性检测，将继续尝试官方源并保留 nvm 的详细错误输出。"
+}
+
+install_node_with_mirror_fallback() {
+  local user_mirror="${NVM_NODEJS_ORG_MIRROR:-}"
+  local fallback_mirror="${NODE_DIST_MIRROR_FALLBACK%/}"
+
+  select_nvm_node_dist_mirror
+  if nvm install "$REQUIRED_NODE_MAJOR"; then
+    return 0
+  fi
+
+  if [[ -z "$user_mirror" && "${NVM_NODEJS_ORG_MIRROR%/}" != "$fallback_mirror" ]]; then
+    warn "当前 Node.js 下载源安装失败，尝试国内镜像：$fallback_mirror"
+    if node_dist_mirror_reachable "$fallback_mirror"; then
+      export NVM_NODEJS_ORG_MIRROR="$fallback_mirror"
+      nvm install "$REQUIRED_NODE_MAJOR" && return 0
+    fi
+  fi
+  return 1
 }
 
 ensure_node22() {
@@ -586,7 +639,7 @@ ensure_node22() {
   install_nvm
   info "通过 nvm 安装/切换 Node.js $REQUIRED_NODE_MAJOR"
   info "执行：nvm install $REQUIRED_NODE_MAJOR"
-  nvm install "$REQUIRED_NODE_MAJOR" || fatal "nvm install $REQUIRED_NODE_MAJOR 失败。请查看上方 nvm 输出。"
+  install_node_with_mirror_fallback || fatal "nvm install $REQUIRED_NODE_MAJOR 失败。请查看上方 nvm 输出。"
   info "执行：nvm alias default $REQUIRED_NODE_MAJOR"
   nvm alias default "$REQUIRED_NODE_MAJOR" >/dev/null || fatal "nvm alias default $REQUIRED_NODE_MAJOR 失败。"
   info "执行：nvm use $REQUIRED_NODE_MAJOR"
